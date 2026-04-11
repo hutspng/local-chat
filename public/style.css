@@ -1,0 +1,328 @@
+    :root{
+      --bg:#0b1220; --panel:#111a2e; --text:#e7eefc; --muted:#9bb0d1;
+      --border:rgba(255,255,255,.10); --accent:#6aa6ff;
+    }
+    *{ box-sizing:border-box; }
+    body{
+      margin:0; background:radial-gradient(900px 600px at 20% 0%, #16264a 0%, var(--bg) 60%);
+      color:var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      min-height:100vh; display:grid; place-items:center; padding:16px;
+    }
+    .card{
+      width:min(920px, 96vw);
+      height:min(92vh, 760px);
+      background:rgba(17,26,46,.92);
+      border:1px solid var(--border);
+      border-radius:16px;
+      box-shadow: 0 18px 60px rgba(0,0,0,.55);
+      overflow:hidden;
+      position: relative;
+      display:flex;
+      flex-direction:column;
+    }
+    header{
+      padding:12px 14px;
+      display:flex; gap:10px; align-items:center; justify-content:space-between;
+      border-bottom:1px solid var(--border);
+    }
+    header strong{ letter-spacing:.2px; }
+    header .right{ display:flex; gap:10px; align-items:center; color:var(--muted); font-size:12px; }
+    .statusDot{ width:10px; height:10px; border-radius:50%; background:#ff4d6d; }
+    .statusDot.on{ background:#32d296; }
+    .main{
+      display:grid;
+      grid-template-columns: 1fr 280px;
+      gap:0;
+      min-height: 0;
+      flex:1;
+    }
+    .chat{
+      padding:12px;
+      border-right:1px solid var(--border);
+      display:flex; flex-direction:column; gap:10px;
+      min-width: 0;
+      min-height: 0;
+    }
+
+    /* ✅ log como "lista" vertical (cada mensagem em uma linha/bolha) */
+    .log{
+      flex:1;
+      min-height:0;
+      background:rgba(0,0,0,.18);
+      border:1px solid var(--border);
+      border-radius:12px;
+      padding:10px;
+      overflow:auto;
+
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      align-items: stretch;
+
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size:12px;
+      line-height:1.35;
+      white-space:normal; /* importante: não colar tudo numa linha */
+
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,.26) transparent;
+    }
+
+    .log::-webkit-scrollbar,
+    .systemLog::-webkit-scrollbar{
+      width:8px;
+      height:8px;
+    }
+
+    .log::-webkit-scrollbar-track,
+    .systemLog::-webkit-scrollbar-track{
+      background: transparent;
+    }
+
+    .log::-webkit-scrollbar-thumb,
+    .systemLog::-webkit-scrollbar-thumb{
+      background: rgba(255,255,255,.22);
+      border-radius: 999px;
+      border: 2px solid transparent;
+      background-clip: content-box;
+    }
+
+    .log::-webkit-scrollbar-thumb:hover,
+    .systemLog::-webkit-scrollbar-thumb:hover{
+      background: rgba(255,255,255,.34);
+      background-clip: content-box;
+    }
+
+    .msgLine{
+      display:flex;
+      flex-direction:column;
+      flex: 0 0 auto;
+      position: relative;
+      width:100%;
+      padding:8px 10px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.08);
+      background: rgba(255,255,255,.03);
+      color: var(--text);
+      overflow: hidden;
+
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+
+    .msgLine.system{
+      color: var(--muted);
+      border-style: dashed;
+      background: rgba(255,255,255,.02);
+    }
+
+    .msgMeta{
+      color: rgba(231,238,252,.75);
+    }
+    .msgText{
+      color: var(--text);
+      margin-top:4px;
+    }
+
+    .chatLink{
+      color:#9dc4ff;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    .chatImage{
+      display:block;
+      margin-top:8px;
+      max-width: 100%;
+      width: auto;
+      height: auto;
+      max-height: 220px;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,.12);
+      object-fit:contain;
+    }
+
+    .msgLine.imageOnly{
+      width: auto;
+      max-width: min(100%, 260px);
+      align-self: flex-start;
+    }
+
+    .msgLine.imageOnly .chatImage{
+      width: 100%;
+      max-width: 240px;
+      max-height: none;
+    }
+
+    .imageCaption{
+      margin-top:4px;
+      color:var(--muted);
+      font-size:11px;
+    }
+
+    .form{
+      display:flex; gap:10px;
+      min-width: 0;
+    }
+    input{
+      border:1px solid var(--border);
+      background:rgba(255,255,255,.04);
+      color:var(--text);
+      border-radius:12px;
+      padding:10px 12px;
+      outline:none;
+      min-width: 0;
+    }
+    input:focus{ border-color: rgba(106,166,255,.55); }
+    #msg{ flex:1; }
+    button{
+      border:1px solid var(--border);
+      background:rgba(106,166,255,.16);
+      color:var(--text);
+      border-radius:12px;
+      padding:10px 12px;
+      font-weight:800;
+      cursor:pointer;
+      white-space: nowrap;
+    }
+    button:hover{ background:rgba(106,166,255,.24); }
+    button:disabled{ opacity:.55; cursor:not-allowed; }
+
+    aside{
+      padding:12px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      min-height:0;
+      overflow:auto;
+    }
+    .box{
+      border:1px solid var(--border);
+      border-radius:12px;
+      padding:10px;
+      background:rgba(255,255,255,.03);
+    }
+    .box .label{ color:var(--muted); font-size:12px; }
+    .box .value{ margin-top:6px; font-weight:800; }
+    .small{ color:var(--muted); font-size:12px; line-height:1.35; }
+
+    .sysBox{
+      display:flex;
+      flex-direction:column;
+      min-height: 220px;
+    }
+
+    .systemLog{
+      margin-top:8px;
+      flex:1;
+      min-height: 170px;
+      max-height: 280px;
+      overflow:auto;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      padding:8px;
+      border:1px dashed rgba(255,255,255,.14);
+      border-radius:10px;
+      background:rgba(255,255,255,.02);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size:11px;
+      line-height:1.35;
+      color:var(--muted);
+
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,.26) transparent;
+    }
+
+    .sysLine{
+      padding:7px 8px;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,.08);
+      background:rgba(255,255,255,.02);
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+
+    /* ===== Modal de Nome ===== */
+    .nameOverlay{
+      position:absolute;
+      inset:0;
+      display:none;
+      place-items:center;
+      background: rgba(0,0,0,.55);
+      backdrop-filter: blur(3px);
+      padding: 16px;
+    }
+    .nameOverlay.show{ display:grid; }
+
+    .nameModal{
+      width:min(520px, 92vw);
+      border:1px solid var(--border);
+      background: rgba(12, 20, 44, .92);
+      border-radius:16px;
+      padding: 16px;
+      box-shadow: 0 18px 60px rgba(0,0,0,.55);
+    }
+    .nameModal h2{ margin:0 0 8px; }
+    .nameModal p{ margin:0 0 12px; color:var(--muted); }
+    .nameRow{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      justify-content:flex-end;
+      flex-wrap:wrap;
+    }
+    .nameRow input{ flex: 1; min-width: 200px; }
+
+    .imageViewer{
+      position:fixed;
+      inset:0;
+      display:none;
+      background:rgba(2,6,16,.92);
+      z-index:1200;
+    }
+
+    .imageViewer.show{
+      display:block;
+    }
+
+    .viewerClose{
+      position:absolute;
+      top:12px;
+      right:12px;
+      z-index:2;
+      background:rgba(255,255,255,.14);
+    }
+
+    .viewerStage{
+      position:absolute;
+      top:0;
+      left:0;
+      width:100%;
+      height:100%;
+      display:flex;
+      justify-content:center;
+      align-items:center;
+      padding:0;
+      touch-action: none;
+      cursor:grab;
+    }
+
+    .viewerStage.panning{
+      cursor:grabbing;
+      user-select:none;
+    }
+
+    #viewerImage{
+      display:block;
+      max-width:none;
+      max-height:none;
+      width:auto;
+      height:auto;
+      flex-shrink:0;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.16);
+      transform-origin:center center;
+      cursor:zoom-in;
+      user-select:none;
+    }

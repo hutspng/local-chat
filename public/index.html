@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Chat Local (LAN)</title>
+    <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="card">
+    <header>
+      <strong>Chat Local (LAN)</strong>
+      <div class="right">
+        <span class="statusDot" id="dot"></span>
+        <span id="status">desconectado</span>
+      </div>
+    </header>
+
+    <div class="main">
+      <section class="chat">
+        <div class="log" id="log"></div>
+        <div class="form">
+          <input id="msg" placeholder="Digite sua mensagem..." maxlength="500" disabled />
+          <button id="pickImage" type="button" disabled>Imagem</button>
+          <input id="imageInput" type="file" accept="image/*" hidden />
+          <button id="send" disabled>Enviar</button>
+        </div>
+      </section>
+
+      <aside>
+        <div class="box">
+          <div class="label">Dica de link</div>
+          <div class="value" id="linkHint">http://IP_DO_SERVIDOR:3000</div>
+        </div>
+        <div class="box small">
+          <div><strong>Como usar na rede:</strong></div>
+          <div>1) Rode o servidor no PC “host”.</div>
+          <div>2) Descubra o IP dele (ex: 192.168.0.10).</div>
+          <div>3) Em outro PC, abra: <em>http://IP:3000</em></div>
+          <div style="margin-top:8px;"><strong>Obs:</strong> libere a porta 3000 no firewall do host.</div>
+        </div>
+        <div class="box sysBox">
+          <div class="label">Chat do sistema</div>
+          <div class="systemLog" id="systemLog" aria-live="polite"></div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- Modal para definir nome (obrigatório antes de usar o chat) -->
+    <div class="nameOverlay" id="nameOverlay" aria-modal="true" role="dialog">
+      <div class="nameModal">
+        <h2>Escolha seu nome</h2>
+        <p>Antes de entrar no chat, defina um nome (obrigatório).</p>
+        <div class="nameRow">
+          <input id="namePick" placeholder="Ex: Jorge" maxlength="24" />
+          <button id="enterChat">Entrar</button>
+        </div>
+        <p class="small" style="margin-top:10px;">
+          Dica: seu nome fica salvo neste navegador.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="imageViewer" id="imageViewer" aria-modal="true" role="dialog" aria-label="Visualizador de imagem">
+    <button class="viewerClose" id="viewerClose" type="button" aria-label="Fechar">Fechar</button>
+    <div class="viewerStage" id="viewerStage">
+      <img id="viewerImage" alt="Imagem ampliada" />
+    </div>
+  </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
