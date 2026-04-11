@@ -5,7 +5,12 @@
     const msgEl = document.getElementById("msg");
     const pickImageBtn = document.getElementById("pickImage");
     const imageInput = document.getElementById("imageInput");
+    const pickFileBtn = document.getElementById("pickFile");
+    const fileInput = document.getElementById("fileInput");
     const sendBtn = document.getElementById("send");
+    const uploadStatus = document.getElementById("uploadStatus");
+    const uploadLabel = document.getElementById("uploadLabel");
+    const uploadBarFill = document.getElementById("uploadBarFill");
     const linkHint = document.getElementById("linkHint");
     const imageViewer = document.getElementById("imageViewer");
     const viewerClose = document.getElementById("viewerClose");
@@ -24,6 +29,13 @@
         .trim()
         .replace(/\s+/g, " ")
         .slice(0, 24);
+    }
+
+    function formatBytes(bytes) {
+      const n = Number(bytes) || 0;
+      if (n < 1024) return `${n} B`;
+      if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+      return `${(n / (1024 * 1024)).toFixed(2)} MB`;
     }
 
     function addSystemLine(text) {
@@ -78,11 +90,12 @@
       }
     }
 
-    function addChatLine({ at = "", name = "Anônimo", text = "", imageData = "", imageName = "" }) {
+    function addChatLine({ at = "", name = "Anônimo", text = "", imageData = "", imageName = "", fileData = "", fileName = "", fileType = "", fileSize = 0 }) {
       const div = document.createElement("div");
       div.className = "msgLine chat";
       const hasText = !!String(text || "").trim();
       const hasImage = !!imageData;
+      const hasFile = !!fileData;
 
       if (!hasText && hasImage) {
         div.classList.add("imageOnly");
@@ -117,6 +130,35 @@
         }
       }
 
+      if (hasFile) {
+        const fileCard = document.createElement("div");
+        fileCard.className = "fileCard";
+
+        const fileMeta = document.createElement("div");
+        fileMeta.className = "fileMeta";
+
+        const fileNameEl = document.createElement("div");
+        fileNameEl.className = "fileName";
+        fileNameEl.textContent = fileName || "arquivo";
+
+        const fileInfoEl = document.createElement("div");
+        fileInfoEl.className = "fileInfo";
+        fileInfoEl.textContent = `${fileType || "arquivo"} • ${formatBytes(fileSize)}`;
+
+        const downloadLink = document.createElement("a");
+        downloadLink.className = "fileDownloadBtn";
+        downloadLink.href = fileData;
+        downloadLink.download = fileName || "arquivo";
+        downloadLink.textContent = "Baixar";
+        downloadLink.rel = "noopener noreferrer";
+
+        fileMeta.appendChild(fileNameEl);
+        fileMeta.appendChild(fileInfoEl);
+        fileCard.appendChild(fileMeta);
+        fileCard.appendChild(downloadLink);
+        div.appendChild(fileCard);
+      }
+
       log.appendChild(div);
       log.scrollTop = log.scrollHeight;
     }
@@ -138,6 +180,7 @@
     function enableChatUI(enable) {
       msgEl.disabled = !enable;
       pickImageBtn.disabled = !enable;
+      pickFileBtn.disabled = !enable;
       sendBtn.disabled = !enable;
       if (enable) msgEl.focus();
     }
@@ -191,6 +234,22 @@
     const wsUrl = `${proto}//${location.host}`;
     let ws;
     let historyApplied = false;
+    const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+    const MAX_FILE_BYTES = 100 * 1024 * 1024;
+    const CHUNK_SIZE = 256 * 1024;
+    let uploadInProgress = false;
+
+    function setUploadProgress(visible, label = "", percent = 0) {
+      uploadStatus.classList.toggle("show", visible);
+      if (!visible) {
+        uploadBarFill.style.width = "0%";
+        return;
+      }
+
+      uploadLabel.textContent = label;
+      const safePercent = Math.max(0, Math.min(100, Math.round(percent)));
+      uploadBarFill.style.width = `${safePercent}%`;
+    }
 
     function connect() {
       if (!myName) return;
@@ -256,9 +315,8 @@
         return;
       }
 
-      const maxBytes = 1.5 * 1024 * 1024;
-      if (file.size > maxBytes) {
-        addSystemLine("[sistema] imagem muito grande. Limite: 1.5 MB.");
+      if (file.size > MAX_IMAGE_BYTES) {
+        addSystemLine(`[sistema] imagem muito grande (${formatBytes(file.size)}). Limite: 10 MB.`);
         return;
       }
 
@@ -267,20 +325,118 @@
         return;
       }
 
-      const reader = new FileReader();
-      reader.addEventListener("load", () => {
-        const imageData = typeof reader.result === "string" ? reader.result : "";
-        if (!imageData) return;
+      sendFileInChunks(file, "image");
+    }
 
+    function isAllowedAttachment(file) {
+      const name = (file.name || "").toLowerCase();
+      const type = (file.type || "").toLowerCase();
+      const byMime = type.startsWith("text/")
+        || type === "application/zip"
+        || type === "application/x-zip-compressed"
+        || type === "application/x-rar-compressed"
+        || type === "application/vnd.rar"
+        || type === "application/x-7z-compressed";
+      const byExt = /\.(txt|md|csv|log|json|xml|zip|rar|7z)$/i.test(name);
+      return byMime || byExt;
+    }
+
+    function sendAttachmentFile(file) {
+      if (!file) return;
+
+      if (!myName) {
+        showNameModal();
+        return;
+      }
+
+      if (!isAllowedAttachment(file)) {
+        addSystemLine("[sistema] tipo de arquivo não suportado. Use texto ou compactado (.zip/.rar/.7z).");
+        return;
+      }
+
+      if (file.size > MAX_FILE_BYTES) {
+        addSystemLine(`[sistema] arquivo muito grande (${formatBytes(file.size)}). Limite: 100 MB.`);
+        return;
+      }
+
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        addSystemLine("[sistema] você está offline. Não foi possível enviar o arquivo.");
+        return;
+      }
+
+      sendFileInChunks(file, "file");
+    }
+
+    function uint8ArrayToBase64(bytes) {
+      let binary = "";
+      const step = 0x8000;
+      for (let i = 0; i < bytes.length; i += step) {
+        const chunk = bytes.subarray(i, i + step);
+        binary += String.fromCharCode(...chunk);
+      }
+      return btoa(binary);
+    }
+
+    async function sendFileInChunks(file, kind) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        addSystemLine("[sistema] conexão indisponível para enviar arquivo.");
+        return;
+      }
+
+      if (uploadInProgress) {
+        addSystemLine("[sistema] aguarde o envio atual terminar para iniciar outro.");
+        return;
+      }
+
+      uploadInProgress = true;
+
+      const safeFileName = (file.name || (kind === "image" ? "imagem" : "arquivo")).slice(0, 120);
+      const safeFileType = (file.type || (kind === "image" ? "image/png" : "application/octet-stream")).slice(0, 80);
+      const totalChunks = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
+      const transferId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+      setUploadProgress(true, `Enviando ${safeFileName}... 0%`, 0);
+
+      try {
         ws.send(JSON.stringify({
-          type: "chat",
+          type: "file-start",
+          transferId,
+          kind,
           name: myName,
-          text: "",
-          imageData,
-          imageName: (file.name || "imagem-colada.png").slice(0, 80)
+          fileName: safeFileName,
+          fileType: safeFileType,
+          fileSize: Number(file.size) || 0,
+          totalChunks
         }));
-      });
-      reader.readAsDataURL(file);
+
+        for (let index = 0; index < totalChunks; index += 1) {
+          if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error("offline");
+
+          const start = index * CHUNK_SIZE;
+          const end = Math.min(file.size, start + CHUNK_SIZE);
+          const buffer = await file.slice(start, end).arrayBuffer();
+          const base64Chunk = uint8ArrayToBase64(new Uint8Array(buffer));
+
+          ws.send(JSON.stringify({
+            type: "file-chunk",
+            transferId,
+            index,
+            data: base64Chunk
+          }));
+
+          const percent = ((index + 1) / totalChunks) * 100;
+          setUploadProgress(true, `Enviando ${safeFileName}... ${Math.round(percent)}%`, percent);
+        }
+
+        ws.send(JSON.stringify({ type: "file-end", transferId }));
+        setUploadProgress(true, `Enviado ${safeFileName}`, 100);
+        setTimeout(() => setUploadProgress(false), 700);
+      } catch {
+        setUploadProgress(false);
+        addSystemLine("[sistema] falha ao enviar arquivo em blocos.");
+      } finally {
+        uploadInProgress = false;
+      }
     }
 
     let viewerBaseScale = 1;
@@ -372,10 +528,24 @@
       imageInput.click();
     });
 
+    pickFileBtn.addEventListener("click", () => {
+      if (!myName) {
+        showNameModal();
+        return;
+      }
+      fileInput.click();
+    });
+
     imageInput.addEventListener("change", () => {
       const file = imageInput.files && imageInput.files[0];
       imageInput.value = "";
       sendImageFile(file);
+    });
+
+    fileInput.addEventListener("change", () => {
+      const file = fileInput.files && fileInput.files[0];
+      fileInput.value = "";
+      sendAttachmentFile(file);
     });
 
     msgEl.addEventListener("paste", (e) => {

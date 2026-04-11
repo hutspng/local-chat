@@ -7,6 +7,9 @@
       margin:0; background:radial-gradient(900px 600px at 20% 0%, #16264a 0%, var(--bg) 60%);
       color:var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
       min-height:100vh; display:grid; place-items:center; padding:16px;
+      /* background-image: url("1 - prima.jpg");  */
+      background-size: cover;
+      background-position: center;
     }
     .card{
       width:min(920px, 96vw);
@@ -160,9 +163,98 @@
       font-size:11px;
     }
 
+    .fileCard{
+      margin-top:8px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      padding:8px;
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:10px;
+      background:rgba(255,255,255,.03);
+    }
+
+    .fileMeta{
+      min-width:0;
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+    }
+
+    .fileName{
+      font-size:12px;
+      color:var(--text);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      max-width:240px;
+    }
+
+    .fileInfo{
+      font-size:11px;
+      color:var(--muted);
+    }
+
+    .fileDownloadBtn{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      padding:7px 10px;
+      border-radius:9px;
+      border:1px solid var(--border);
+      color:var(--text);
+      background:rgba(106,166,255,.16);
+      text-decoration:none;
+      font-size:11px;
+      font-weight:700;
+      white-space:nowrap;
+    }
+
+    .fileDownloadBtn:hover{
+      background:rgba(106,166,255,.24);
+    }
+
     .form{
       display:flex; gap:10px;
       min-width: 0;
+    }
+
+    .uploadStatus{
+      display:none;
+      margin-top:2px;
+      padding:8px 10px;
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:10px;
+      background:rgba(255,255,255,.03);
+    }
+
+    .uploadStatus.show{
+      display:block;
+    }
+
+    .uploadLabel{
+      font-size:11px;
+      color:var(--muted);
+      margin-bottom:6px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    .uploadBarTrack{
+      height:8px;
+      border-radius:999px;
+      background:rgba(255,255,255,.10);
+      overflow:hidden;
+    }
+
+    .uploadBarFill{
+      height:100%;
+      width:0%;
+      border-radius:999px;
+      background:linear-gradient(90deg, #64c6ff 0%, #75a9ff 100%);
+      transition:width .12s linear;
     }
     input{
       border:1px solid var(--border);

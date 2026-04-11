@@ -23,7 +23,15 @@
           <input id="msg" placeholder="Digite sua mensagem..." maxlength="500" disabled />
           <button id="pickImage" type="button" disabled>Imagem</button>
           <input id="imageInput" type="file" accept="image/*" hidden />
+          <button id="pickFile" type="button" disabled>Arquivo</button>
+          <input id="fileInput" type="file" accept=".txt,.md,.csv,.log,.json,.xml,.zip,.rar,.7z,text/plain,text/markdown,text/csv,application/json,application/xml,application/zip,application/x-zip-compressed,application/x-rar-compressed,application/x-7z-compressed" hidden />
           <button id="send" disabled>Enviar</button>
+        </div>
+        <div class="uploadStatus" id="uploadStatus" aria-live="polite">
+          <div class="uploadLabel" id="uploadLabel">Enviando...</div>
+          <div class="uploadBarTrack">
+            <div class="uploadBarFill" id="uploadBarFill"></div>
+          </div>
         </div>
       </section>
 
