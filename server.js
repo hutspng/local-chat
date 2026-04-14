@@ -24,10 +24,21 @@ const activeUsers = new Map(); // deviceId -> Set of WebSocket connections
 const chatHistory = [];
 const MAX_HISTORY = 200;
 let messageIdCounter = 0;
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
-const MAX_FILE_BYTES = 100 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
+const MAX_FILE_BYTES = 1024 * 1024 * 1024;
 const MAX_CHUNK_BASE64_CHARS = 500_000;
 const TRANSFER_TIMEOUT_MS = 5 * 60 * 1000;
+const MAX_MESSAGE_LINES = 100;
+const MAX_MESSAGE_CHARS = 10000;
+
+function normalizeMessageText(raw) {
+  const limitedChars = String(raw || "").slice(0, MAX_MESSAGE_CHARS);
+  const normalizedBreaks = limitedChars.replace(/\r\n/g, "\n");
+  const lines = normalizedBreaks.split("\n");
+  if (lines.length <= MAX_MESSAGE_LINES) return normalizedBreaks;
+  return lines.slice(0, MAX_MESSAGE_LINES).join("\n");
+}
 
 function nowTime() {
   const d = new Date();
@@ -57,6 +68,7 @@ function publishChat(entry) {
 wss.on("connection", (ws) => {
   clients.add(ws);
   ws.incomingTransfers = new Map();
+  ws.incomingBundles = new Map();
   ws.deviceId = null;
   let isNewUser = false;
 
@@ -126,38 +138,54 @@ function onMessage(raw) {
 
   if (data.type === "chat") {
       const name = String(data.name || "Anônimo").slice(0, 24);
-      const text = String(data.text || "").slice(0, 500);
+      const text = normalizeMessageText(data.text);
       const imageData = typeof data.imageData === "string" ? data.imageData : "";
       const imageName = String(data.imageName || "").slice(0, 80);
+      const videoData = typeof data.videoData === "string" ? data.videoData : "";
+      const videoName = String(data.videoName || "").slice(0, 80);
       const fileData = typeof data.fileData === "string" ? data.fileData : "";
       const fileName = String(data.fileName || "").slice(0, 120);
       const fileType = String(data.fileType || "").slice(0, 80);
       const fileSize = Number(data.fileSize) || 0;
+      const bundleFiles = Array.isArray(data.bundleFiles) ? data.bundleFiles.slice(0, 200) : [];
 
       const hasText = !!text.trim();
       const hasImage = !!imageData;
+      const hasVideo = !!videoData;
       const hasFile = !!fileData;
+      const hasBundle = bundleFiles.length > 0;
 
-      if (!hasText && !hasImage && !hasFile) return;
+      if (!hasText && !hasImage && !hasVideo && !hasFile && !hasBundle) return;
 
       if (hasImage) {
         const isDataImage = /^data:image\/[a-zA-Z0-9.+-]+;base64,/.test(imageData);
-        const maxImageChars = 14_000_000;
+        const maxImageChars = 70_000_000;
         if (!isDataImage || imageData.length > maxImageChars) return;
       }
 
       if (hasFile) {
         const isDataFile = /^data:[^;]+;base64,/.test(fileData);
-        const maxFileChars = 145_000_000;
-        const allowedType = /^text\//.test(fileType)
-          || fileType === "application/zip"
-          || fileType === "application/x-zip-compressed"
-          || fileType === "application/x-rar-compressed"
-          || fileType === "application/vnd.rar"
-          || fileType === "application/x-7z-compressed"
-          || /\.(txt|md|csv|log|json|xml|zip|rar|7z)$/i.test(fileName);
+        const maxFileChars = 1_500_000_000;
+        if (!isDataFile || fileData.length > maxFileChars || fileSize > MAX_FILE_BYTES) return;
+      }
 
-        if (!isDataFile || fileData.length > maxFileChars || !allowedType || fileSize > 100 * 1024 * 1024) return;
+      if (hasVideo) {
+        const isDataVideo = /^data:video\/[a-zA-Z0-9.+-]+;base64,/.test(videoData);
+        const maxVideoChars = 750_000_000;
+        if (!isDataVideo || videoData.length > maxVideoChars) return;
+      }
+
+      if (hasBundle) {
+        for (const item of bundleFiles) {
+          const iFileData = typeof item?.fileData === "string" ? item.fileData : "";
+          const iFileName = String(item?.fileName || "").slice(0, 120);
+          const iFileType = String(item?.fileType || "application/octet-stream").slice(0, 80);
+          const iFileSize = Number(item?.fileSize) || 0;
+          if (!/^data:[^;]+;base64,/.test(iFileData)) return;
+          if (!iFileName) return;
+          if (!iFileType) return;
+          if (iFileSize <= 0 || iFileSize > MAX_FILE_BYTES) return;
+        }
       }
 
       const at = nowTime();
@@ -168,41 +196,59 @@ function onMessage(raw) {
         text,
         imageData: hasImage ? imageData : "",
         imageName: hasImage ? imageName : "",
+        videoData: hasVideo ? videoData : "",
+        videoName: hasVideo ? videoName : "",
         fileData: hasFile ? fileData : "",
         fileName: hasFile ? fileName : "",
         fileType: hasFile ? fileType : "",
         fileSize: hasFile ? fileSize : 0,
+        bundleFiles: hasBundle ? bundleFiles : [],
         at
+      });
+      return;
+    }
+
+    if (data.type === "bundle-start") {
+      const bundleId = String(data.bundleId || "").slice(0, 64);
+      const name = String(data.name || "Anônimo").slice(0, 24);
+      const totalInBundle = Number(data.totalInBundle);
+
+      if (!bundleId) return;
+      if (!Number.isInteger(totalInBundle) || totalInBundle < 2 || totalInBundle > 200) return;
+
+      ws.incomingBundles.set(bundleId, {
+        name,
+        totalInBundle,
+        items: new Array(totalInBundle).fill(null),
+        at: nowTime(),
+        startedAt: Date.now()
       });
       return;
     }
 
     if (data.type === "file-start") {
       const transferId = String(data.transferId || "").slice(0, 64);
-      const kind = data.kind === "image" ? "image" : "file";
+      const kind = data.kind === "image" || data.kind === "video" ? data.kind : "file";
       const name = String(data.name || "Anônimo").slice(0, 24);
       const fileName = String(data.fileName || "arquivo").slice(0, 120);
-      const fileType = String(data.fileType || (kind === "image" ? "image/png" : "application/octet-stream")).slice(0, 80);
+      const fileType = String(data.fileType || (kind === "image" ? "image/png" : kind === "video" ? "video/mp4" : "application/octet-stream")).slice(0, 80);
       const fileSize = Number(data.fileSize) || 0;
       const totalChunks = Number(data.totalChunks) || 0;
+      const bundleId = String(data.bundleId || "").slice(0, 64);
+      const bundleIndex = Number(data.bundleIndex);
+      const totalInBundle = Number(data.totalInBundle);
 
       if (!transferId || ws.incomingTransfers.has(transferId)) return;
       if (totalChunks < 1 || totalChunks > 100000) return;
 
-      const maxBytes = kind === "image" ? MAX_IMAGE_BYTES : MAX_FILE_BYTES;
+      const maxBytes = kind === "image" ? MAX_IMAGE_BYTES : kind === "video" ? MAX_VIDEO_BYTES : MAX_FILE_BYTES;
       if (fileSize <= 0 || fileSize > maxBytes) return;
 
       if (kind === "image" && !/^image\//.test(fileType)) return;
-      if (kind === "file") {
-        const allowed = /^text\//.test(fileType)
-          || fileType === "application/zip"
-          || fileType === "application/x-zip-compressed"
-          || fileType === "application/x-rar-compressed"
-          || fileType === "application/vnd.rar"
-          || fileType === "application/x-7z-compressed"
-          || /\.(txt|md|csv|log|json|xml|zip|rar|7z)$/i.test(fileName);
-        if (!allowed) return;
-      }
+      if (kind === "video" && !/^video\//.test(fileType)) return;
+      if (bundleId && (!Number.isInteger(bundleIndex) || bundleIndex < 0)) return;
+      if (bundleId && (!Number.isInteger(totalInBundle) || totalInBundle < 2 || totalInBundle > 200)) return;
+      if (bundleId && !ws.incomingBundles.has(bundleId)) return;
 
       ws.incomingTransfers.set(transferId, {
         transferId,
@@ -212,6 +258,9 @@ function onMessage(raw) {
         fileType,
         fileSize,
         totalChunks,
+        bundleId,
+        bundleIndex,
+        totalInBundle,
         chunks: new Array(totalChunks),
         received: 0,
         base64Chars: 0,
@@ -276,11 +325,71 @@ function onMessage(raw) {
           text: "",
           imageData: `data:${transfer.fileType};base64,${base64}`,
           imageName: transfer.fileName,
+          videoData: "",
+          videoName: "",
           fileData: "",
           fileName: "",
           fileType: "",
           fileSize: 0,
+          bundleFiles: [],
           at
+        });
+        return;
+      }
+
+      if (transfer.kind === "video") {
+        publishChat({
+          type: "chat",
+          name: transfer.name,
+          text: "",
+          imageData: "",
+          imageName: "",
+          videoData: `data:${transfer.fileType};base64,${base64}`,
+          videoName: transfer.fileName,
+          fileData: "",
+          fileName: "",
+          fileType: "",
+          fileSize: 0,
+          bundleFiles: [],
+          at
+        });
+        return;
+      }
+
+      if (transfer.bundleId) {
+        const key = transfer.bundleId;
+        const bundle = ws.incomingBundles.get(key);
+        if (!bundle || transfer.bundleIndex >= bundle.totalInBundle) return;
+        if (Date.now() - bundle.startedAt > TRANSFER_TIMEOUT_MS) {
+          ws.incomingBundles.delete(key);
+          return;
+        }
+
+        bundle.items[transfer.bundleIndex] = {
+          fileData: `data:${transfer.fileType};base64,${base64}`,
+          fileName: transfer.fileName,
+          fileType: transfer.fileType,
+          fileSize: transfer.fileSize
+        };
+
+        const complete = bundle.items.every((item) => item && typeof item.fileData === "string");
+        if (!complete) return;
+
+        ws.incomingBundles.delete(key);
+        publishChat({
+          type: "chat",
+          name: bundle.name,
+          text: "",
+          imageData: "",
+          imageName: "",
+          videoData: "",
+          videoName: "",
+          fileData: "",
+          fileName: "",
+          fileType: "",
+          fileSize: 0,
+          bundleFiles: bundle.items,
+          at: bundle.at || at
         });
         return;
       }
@@ -291,10 +400,13 @@ function onMessage(raw) {
         text: "",
         imageData: "",
         imageName: "",
+        videoData: "",
+        videoName: "",
         fileData: `data:${transfer.fileType};base64,${base64}`,
         fileName: transfer.fileName,
         fileType: transfer.fileType,
         fileSize: transfer.fileSize,
+        bundleFiles: [],
         at
       });
     }
@@ -305,6 +417,7 @@ function handleClientClose(ws) {
 
   clients.delete(ws);
   if (ws.incomingTransfers) ws.incomingTransfers.clear();
+  if (ws.incomingBundles) ws.incomingBundles.clear();
 
   const userConnections = activeUsers.get(ws.deviceId);
   if (userConnections) {

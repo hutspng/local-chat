@@ -20,11 +20,11 @@
       <section class="chat">
         <div class="log" id="log"></div>
         <div class="form">
-          <input id="msg" placeholder="Digite sua mensagem..." maxlength="500" disabled />
-          <button id="pickImage" type="button" disabled>Imagem</button>
-          <input id="imageInput" type="file" accept="image/*" hidden />
+          <textarea id="msg" placeholder="Digite sua mensagem..." maxlength="10000" rows="3" disabled></textarea>
+          <button id="pickImage" type="button" disabled>Mídia</button>
+          <input id="imageInput" type="file" accept="image/*,video/*" multiple hidden />
           <button id="pickFile" type="button" disabled>Arquivo</button>
-          <input id="fileInput" type="file" accept=".txt,.md,.csv,.log,.json,.xml,.zip,.rar,.7z,text/plain,text/markdown,text/csv,application/json,application/xml,application/zip,application/x-zip-compressed,application/x-rar-compressed,application/x-7z-compressed" hidden />
+          <input id="fileInput" type="file" multiple hidden />
           <button id="send" disabled>Enviar</button>
         </div>
         <div class="uploadStatus" id="uploadStatus" aria-live="polite">
@@ -77,6 +77,7 @@
     </div>
   </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
     <script src="script.js"></script>
 </body>
 </html>

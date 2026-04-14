@@ -38,6 +38,19 @@
       return `${(n / (1024 * 1024)).toFixed(2)} MB`;
     }
 
+    const MAX_MESSAGE_LINES = 100;
+    const MAX_MESSAGE_CHARS = 10000;
+
+    function normalizeMessageText(raw) {
+      const limitedChars = String(raw || "").slice(0, MAX_MESSAGE_CHARS);
+      const normalizedBreaks = limitedChars.replace(/\r\n/g, "\n");
+      const lines = normalizedBreaks.split("\n");
+      if (lines.length <= MAX_MESSAGE_LINES) {
+        return normalizedBreaks;
+      }
+      return lines.slice(0, MAX_MESSAGE_LINES).join("\n");
+    }
+
     function addSystemLine(text) {
       const div = document.createElement("div");
       div.textContent = text;
@@ -98,6 +111,10 @@
             a.className = "chatMention";
             a.href = "#";
             a.textContent = mention;
+            a.title = getMentionTooltipText(mention);
+            a.addEventListener("mouseenter", () => {
+              a.title = getMentionTooltipText(mention);
+            });
             a.addEventListener("click", (e) => {
               e.preventDefault();
               scrollToMessageAndBlink(mentionId);
@@ -117,23 +134,37 @@
       }
     }
 
-    function addChatLine({ at = "", name = "Anônimo", text = "", imageData = "", imageName = "", fileData = "", fileName = "", fileType = "", fileSize = 0, messageId = "" }) {
+    function addChatLine({ at = "", name = "Anônimo", text = "", imageData = "", imageName = "", videoData = "", videoName = "", fileData = "", fileName = "", fileType = "", fileSize = 0, bundleFiles = [], messageId = "" }) {
       const div = document.createElement("div");
       div.className = "msgLine chat";
       if (messageId) div.dataset.messageId = messageId;
       const hasText = !!String(text || "").trim();
       const hasImage = !!imageData;
+      const hasVideo = !!videoData;
       const hasFile = !!fileData;
+      const safeBundleFiles = Array.isArray(bundleFiles)
+        ? bundleFiles.filter((item) => item && typeof item.fileData === "string")
+        : [];
+      const hasBundle = safeBundleFiles.length > 0;
 
       if (!hasText && hasImage) {
         div.classList.add("imageOnly");
       }
 
-      // Rastrear mensagem
+      // Rastrear mensagem com deduplicação por messageId
       if (messageId) {
-        allMessages.push({ messageId, name, at, div });
-        if (!messagesByAuthor[name]) messagesByAuthor[name] = [];
-        messagesByAuthor[name].push(messageId);
+        const existing = messageById.get(messageId);
+        if (existing) {
+          existing.name = name;
+          existing.at = at;
+          existing.div = div;
+        } else {
+          const tracked = { messageId, name, at, div };
+          allMessages.push(tracked);
+          messageById.set(messageId, tracked);
+          if (!messagesByAuthor[name]) messagesByAuthor[name] = [];
+          messagesByAuthor[name].push(messageId);
+        }
       }
 
       const meta = document.createElement("div");
@@ -165,6 +196,22 @@
         }
       }
 
+      if (videoData) {
+        const video = document.createElement("video");
+        video.className = "chatVideo";
+        video.src = videoData;
+        video.controls = true;
+        video.preload = "metadata";
+        div.appendChild(video);
+
+        if (videoName) {
+          const caption = document.createElement("div");
+          caption.className = "imageCaption";
+          caption.textContent = videoName;
+          div.appendChild(caption);
+        }
+      }
+
       if (hasFile) {
         const fileCard = document.createElement("div");
         fileCard.className = "fileCard";
@@ -192,6 +239,46 @@
         fileCard.appendChild(fileMeta);
         fileCard.appendChild(downloadLink);
         div.appendChild(fileCard);
+      }
+
+      if (hasBundle) {
+        const bundleCard = document.createElement("div");
+        bundleCard.className = "bundleCard";
+
+        const bundleMeta = document.createElement("div");
+        bundleMeta.className = "fileMeta";
+
+        const bundleTitle = document.createElement("div");
+        bundleTitle.className = "fileName";
+        bundleTitle.textContent = `${safeBundleFiles.length} arquivos enviados`;
+
+        const totalSize = safeBundleFiles.reduce((acc, item) => acc + (Number(item?.fileSize) || 0), 0);
+        const bundleInfo = document.createElement("div");
+        bundleInfo.className = "fileInfo";
+        bundleInfo.textContent = `Total: ${formatBytes(totalSize)}`;
+
+        const actions = document.createElement("div");
+        actions.className = "bundleActions";
+
+        const openBtn = document.createElement("button");
+        openBtn.type = "button";
+        openBtn.className = "fileDownloadBtn";
+        openBtn.textContent = "Downloads individuais";
+        openBtn.addEventListener("click", () => openBundlePopup(safeBundleFiles));
+
+        const zipBtn = document.createElement("button");
+        zipBtn.type = "button";
+        zipBtn.className = "fileDownloadBtn";
+        zipBtn.textContent = "Baixar tudo (.zip)";
+        zipBtn.addEventListener("click", () => downloadBundleAsZip(safeBundleFiles));
+
+        bundleMeta.appendChild(bundleTitle);
+        bundleMeta.appendChild(bundleInfo);
+        actions.appendChild(openBtn);
+        actions.appendChild(zipBtn);
+        bundleCard.appendChild(bundleMeta);
+        bundleCard.appendChild(actions);
+        div.appendChild(bundleCard);
       }
 
       log.appendChild(div);
@@ -265,21 +352,36 @@
     }
 
     // ===== Funções de menção =====
+    function getAuthorMessageIds(authorRef) {
+      if (messagesByAuthor[authorRef]) return messagesByAuthor[authorRef];
+      const normalized = String(authorRef || "").toLowerCase();
+      const matchedKey = Object.keys(messagesByAuthor).find((name) => name.toLowerCase() === normalized);
+      return matchedKey ? messagesByAuthor[matchedKey] : null;
+    }
+
     function parseMention(mentionStr) {
       // Parse @nome/número ou @nome
       const match = mentionStr.match(/^@([a-záéíóúãõâêôĉäëïöüñ\w-]+)(?:\/(\d+))?$/i);
       if (!match) return null;
       const name = match[1];
-      const backCount = parseInt(match[2]) || 1;
-      if (!messagesByAuthor[name]) return null;
-      const messages = messagesByAuthor[name];
-      const idx = messages.length - backCount;
-      if (idx < 0) return null;
+      const backCount = Number.isInteger(Number(match[2])) ? Number(match[2]) : 0;
+      const messages = getAuthorMessageIds(name);
+      if (!messages || !messages.length) return null;
+      const idx = messages.length - 1 - backCount;
+      if (idx < 0 || idx >= messages.length) return null;
       return messages[idx];
     }
 
+    function getMentionTooltipText(mentionStr) {
+      const targetMessageId = parseMention(mentionStr);
+      if (!targetMessageId) return "Referência não encontrada";
+      const target = messageById.get(targetMessageId);
+      if (!target) return "Referência não encontrada";
+      return `${target.name} às ${target.at}`;
+    }
+
     function scrollToMessageAndBlink(messageId) {
-      const msg = allMessages.find(m => m.messageId === messageId);
+      const msg = messageById.get(messageId);
       if (!msg) return;
       msg.div.scrollIntoView({ behavior: "smooth", block: "center" });
       msg.div.classList.add("mention-blink");
@@ -315,14 +417,16 @@
     function insertMention(name) {
       const before = msgEl.value.lastIndexOf("@");
       if (before === -1) return;
-      msgEl.value = msgEl.value.substring(0, before) + `@${name}/ `;
+      msgEl.value = msgEl.value.substring(0, before) + `@${name}/0 `;
       msgEl.focus();
       document.getElementById("mentionAutocomplete").style.display = "none";
     }
 
     function handleMessageContext(messageId, name) {
       const currentText = msgEl.value;
-      const backCount = (messagesByAuthor[name] ? messagesByAuthor[name].length - 1 : 0);
+      const messages = getAuthorMessageIds(name) || [];
+      const pos = messages.lastIndexOf(messageId);
+      const backCount = pos >= 0 ? (messages.length - 1 - pos) : 0;
       msgEl.value = currentText + (currentText ? " " : "") + `@${name}/${backCount}`;
       msgEl.focus();
     }
@@ -332,9 +436,12 @@
     const wsUrl = `${proto}//${location.host}`;
     let ws;
     let historyApplied = false;
-    const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
-    const MAX_FILE_BYTES = 100 * 1024 * 1024;
-    const CHUNK_SIZE = 256 * 1024;
+    const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
+    const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
+    const MAX_FILE_BYTES = 1024 * 1024 * 1024;
+    const MAX_MEDIA_PER_BATCH = 10;
+    // Must be divisible by 3 so concatenated per-chunk base64 remains valid.
+    const CHUNK_SIZE = 255 * 1024;
     let uploadInProgress = false;
 
     // Gera ou recupera ID único do dispositivo
@@ -348,6 +455,14 @@
     }
     const deviceId = getOrCreateDeviceId();
 
+    function resetMessageTracking() {
+      allMessages.length = 0;
+      messageById.clear();
+      for (const author of Object.keys(messagesByAuthor)) {
+        delete messagesByAuthor[author];
+      }
+    }
+
     function setUploadProgress(visible, label = "", percent = 0) {
       uploadStatus.classList.toggle("show", visible);
       if (!visible) {
@@ -358,6 +473,92 @@
       uploadLabel.textContent = label;
       const safePercent = Math.max(0, Math.min(100, Math.round(percent)));
       uploadBarFill.style.width = `${safePercent}%`;
+    }
+
+    function ensureBundlePopup() {
+      let overlay = document.getElementById("bundlePopup");
+      if (overlay) return overlay;
+
+      overlay = document.createElement("div");
+      overlay.id = "bundlePopup";
+      overlay.className = "bundlePopup";
+      overlay.innerHTML = `
+        <div class="bundlePopupCard">
+          <div class="bundlePopupHeader">
+            <strong>Downloads individuais</strong>
+            <button type="button" id="bundlePopupClose">Fechar</button>
+          </div>
+          <div id="bundlePopupList" class="bundlePopupList"></div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+
+      overlay.addEventListener("click", (e) => {
+        if (e.target === overlay) overlay.classList.remove("show");
+      });
+
+      const closeBtn = overlay.querySelector("#bundlePopupClose");
+      closeBtn.addEventListener("click", () => overlay.classList.remove("show"));
+
+      return overlay;
+    }
+
+    function openBundlePopup(bundleFiles) {
+      const overlay = ensureBundlePopup();
+      const list = overlay.querySelector("#bundlePopupList");
+      list.innerHTML = "";
+
+      for (const file of bundleFiles) {
+        const row = document.createElement("div");
+        row.className = "bundlePopupItem";
+
+        const info = document.createElement("div");
+        info.className = "bundlePopupInfo";
+        info.textContent = `${file.fileName || "arquivo"} (${formatBytes(file.fileSize || 0)})`;
+
+        const link = document.createElement("a");
+        link.className = "fileDownloadBtn";
+        link.href = file.fileData;
+        link.download = file.fileName || "arquivo";
+        link.textContent = "Baixar";
+        link.rel = "noopener noreferrer";
+
+        row.appendChild(info);
+        row.appendChild(link);
+        list.appendChild(row);
+      }
+
+      overlay.classList.add("show");
+    }
+
+    async function downloadBundleAsZip(bundleFiles) {
+      if (!window.JSZip) {
+        addSystemLine("[sistema] biblioteca de ZIP não carregada para baixar tudo.");
+        return;
+      }
+
+      try {
+        const zip = new window.JSZip();
+        for (const file of bundleFiles) {
+          const fileData = String(file.fileData || "");
+          const commaIndex = fileData.indexOf(",");
+          if (commaIndex === -1) continue;
+          const base64 = fileData.slice(commaIndex + 1);
+          zip.file(file.fileName || "arquivo", base64, { base64: true });
+        }
+
+        const blob = await zip.generateAsync({ type: "blob" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `arquivos-${Date.now()}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch {
+        addSystemLine("[sistema] falha ao gerar o ZIP para baixar tudo.");
+      }
     }
 
     function connect() {
@@ -389,6 +590,7 @@
         } else if (data.type === "history") {
           if (!historyApplied) {
             const items = Array.isArray(data.messages) ? data.messages : [];
+            resetMessageTracking();
             log.innerHTML = "";
             for (const item of items) {
               if (item && item.type === "chat") addChatLine(item);
@@ -405,7 +607,7 @@
       if (!myName) { showNameModal(); return; }
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
-      const text = (msgEl.value || "").trim().slice(0, 500);
+      const text = normalizeMessageText(msgEl.value).trim();
       if (!text) return;
 
       ws.send(JSON.stringify({ type: "chat", name: myName, text }));
@@ -413,60 +615,59 @@
       msgEl.focus();
     }
 
-    function sendImageFile(file) {
-      if (!file) return;
+    function isImageFile(file) {
+      return !!file && String(file.type || "").startsWith("image/");
+    }
+
+    function isVideoFile(file) {
+      return !!file && String(file.type || "").startsWith("video/");
+    }
+
+    async function sendMediaFiles(files) {
+      const selected = Array.from(files || []).filter((file) => isImageFile(file) || isVideoFile(file));
+      if (!selected.length) return;
 
       if (!myName) {
         showNameModal();
-        return;
-      }
-
-      if (!file.type.startsWith("image/")) {
-        addSystemLine("[sistema] selecione um arquivo de imagem válido.");
-        return;
-      }
-
-      if (file.size > MAX_IMAGE_BYTES) {
-        addSystemLine(`[sistema] imagem muito grande (${formatBytes(file.size)}). Limite: 10 MB.`);
         return;
       }
 
       if (!ws || ws.readyState !== WebSocket.OPEN) {
-        addSystemLine("[sistema] você está offline. Não foi possível enviar a imagem.");
+        addSystemLine("[sistema] você está offline. Não foi possível enviar mídia.");
         return;
       }
 
-      sendFileInChunks(file, "image");
+      if (selected.length > MAX_MEDIA_PER_BATCH) {
+        addSystemLine(`[sistema] máximo de ${MAX_MEDIA_PER_BATCH} mídias por envio. As primeiras serão enviadas.`);
+      }
+
+      const limited = selected.slice(0, MAX_MEDIA_PER_BATCH);
+      for (let i = 0; i < limited.length; i += 1) {
+        const file = limited[i];
+        if (isImageFile(file) && file.size > MAX_IMAGE_BYTES) {
+          addSystemLine(`[sistema] imagem muito grande (${formatBytes(file.size)}). Limite: 50 MB.`);
+          continue;
+        }
+
+        if (isVideoFile(file) && file.size > MAX_VIDEO_BYTES) {
+          addSystemLine(`[sistema] vídeo muito grande (${formatBytes(file.size)}). Limite: 500 MB.`);
+          continue;
+        }
+
+        const kind = isImageFile(file) ? "image" : "video";
+        await sendFileInChunks(file, kind, {
+          batchLabelPrefix: `Mídia ${i + 1}/${limited.length}`,
+          finishLabel: `Mídia ${i + 1}/${limited.length} enviada`
+        });
+      }
     }
 
-    function isAllowedAttachment(file) {
-      const name = (file.name || "").toLowerCase();
-      const type = (file.type || "").toLowerCase();
-      const byMime = type.startsWith("text/")
-        || type === "application/zip"
-        || type === "application/x-zip-compressed"
-        || type === "application/x-rar-compressed"
-        || type === "application/vnd.rar"
-        || type === "application/x-7z-compressed";
-      const byExt = /\.(txt|md|csv|log|json|xml|zip|rar|7z)$/i.test(name);
-      return byMime || byExt;
-    }
-
-    function sendAttachmentFile(file) {
-      if (!file) return;
+    async function sendFileBundle(files) {
+      const selected = Array.from(files || []);
+      if (!selected.length) return;
 
       if (!myName) {
         showNameModal();
-        return;
-      }
-
-      if (!isAllowedAttachment(file)) {
-        addSystemLine("[sistema] tipo de arquivo não suportado. Use texto ou compactado (.zip/.rar/.7z).");
-        return;
-      }
-
-      if (file.size > MAX_FILE_BYTES) {
-        addSystemLine(`[sistema] arquivo muito grande (${formatBytes(file.size)}). Limite: 100 MB.`);
         return;
       }
 
@@ -475,7 +676,38 @@
         return;
       }
 
-      sendFileInChunks(file, "file");
+      for (const file of selected) {
+        if (file.size > MAX_FILE_BYTES) {
+          addSystemLine(`[sistema] arquivo muito grande (${formatBytes(file.size)}). Limite: 1 GB.`);
+          return;
+        }
+      }
+
+      if (selected.length === 1) {
+        await sendFileInChunks(selected[0], "file");
+        return;
+      }
+
+      const bundleId = `bundle_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const totalInBundle = selected.length;
+      ws.send(JSON.stringify({
+        type: "bundle-start",
+        bundleId,
+        name: myName,
+        totalInBundle
+      }));
+
+      addSystemLine(`[sistema] enviando pacote com ${totalInBundle} arquivos...`);
+
+      for (let i = 0; i < selected.length; i += 1) {
+        await sendFileInChunks(selected[i], "file", {
+          bundleId,
+          bundleIndex: i,
+          totalInBundle,
+          batchLabelPrefix: `Arquivo ${i + 1}/${totalInBundle}`,
+          finishLabel: i === totalInBundle - 1 ? "Pacote enviado" : `Arquivo ${i + 1}/${totalInBundle} enviado`
+        });
+      }
     }
 
     function uint8ArrayToBase64(bytes) {
@@ -488,7 +720,7 @@
       return btoa(binary);
     }
 
-    async function sendFileInChunks(file, kind) {
+    async function sendFileInChunks(file, kind, options = {}) {
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         addSystemLine("[sistema] conexão indisponível para enviar arquivo.");
         return;
@@ -501,12 +733,13 @@
 
       uploadInProgress = true;
 
-      const safeFileName = (file.name || (kind === "image" ? "imagem" : "arquivo")).slice(0, 120);
-      const safeFileType = (file.type || (kind === "image" ? "image/png" : "application/octet-stream")).slice(0, 80);
+      const safeFileName = (file.name || (kind === "image" ? "imagem" : kind === "video" ? "video" : "arquivo")).slice(0, 120);
+      const safeFileType = (file.type || (kind === "image" ? "image/png" : kind === "video" ? "video/mp4" : "application/octet-stream")).slice(0, 80);
       const totalChunks = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
       const transferId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
-      setUploadProgress(true, `Enviando ${safeFileName}... 0%`, 0);
+      const batchPrefix = options.batchLabelPrefix ? `${options.batchLabelPrefix} • ` : "";
+      setUploadProgress(true, `${batchPrefix}Enviando ${safeFileName}... 0%`, 0);
 
       try {
         ws.send(JSON.stringify({
@@ -517,7 +750,10 @@
           fileName: safeFileName,
           fileType: safeFileType,
           fileSize: Number(file.size) || 0,
-          totalChunks
+          totalChunks,
+          bundleId: options.bundleId || "",
+          bundleIndex: Number.isInteger(options.bundleIndex) ? options.bundleIndex : -1,
+          totalInBundle: Number.isInteger(options.totalInBundle) ? options.totalInBundle : 0
         }));
 
         for (let index = 0; index < totalChunks; index += 1) {
@@ -536,11 +772,11 @@
           }));
 
           const percent = ((index + 1) / totalChunks) * 100;
-          setUploadProgress(true, `Enviando ${safeFileName}... ${Math.round(percent)}%`, percent);
+          setUploadProgress(true, `${batchPrefix}Enviando ${safeFileName}... ${Math.round(percent)}%`, percent);
         }
 
         ws.send(JSON.stringify({ type: "file-end", transferId }));
-        setUploadProgress(true, `Enviado ${safeFileName}`, 100);
+        setUploadProgress(true, options.finishLabel || `Enviado ${safeFileName}`, 100);
         setTimeout(() => setUploadProgress(false), 700);
       } catch {
         setUploadProgress(false);
@@ -564,6 +800,7 @@
 
     // ===== Rastreamento de menções =====
     const allMessages = []; // { messageId, name, at, div }
+    const messageById = new Map();
     const messagesByAuthor = {}; // { name -> [ messageIds ] }
 
     function updateImageTransform() {
@@ -632,10 +869,18 @@
 
     sendBtn.addEventListener("click", send);
     msgEl.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") send();
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        send();
+      }
     });
 
     msgEl.addEventListener("input", () => {
+      const normalized = normalizeMessageText(msgEl.value);
+      if (normalized !== msgEl.value) {
+        msgEl.value = normalized;
+      }
+
       const value = msgEl.value;
       const atPos = value.lastIndexOf("@");
       if (atPos === -1) {
@@ -659,7 +904,7 @@
       const msgLine = e.target.closest(".msgLine");
       if (!msgLine || !msgLine.dataset.messageId) return;
       const messageId = msgLine.dataset.messageId;
-      const msg = allMessages.find(m => m.messageId === messageId);
+      const msg = messageById.get(messageId);
       if (!msg) return;
       handleMessageContext(messageId, msg.name);
     });
@@ -681,15 +926,15 @@
     });
 
     imageInput.addEventListener("change", () => {
-      const file = imageInput.files && imageInput.files[0];
+      const files = Array.from(imageInput.files || []);
       imageInput.value = "";
-      sendImageFile(file);
+      sendMediaFiles(files);
     });
 
     fileInput.addEventListener("change", () => {
-      const file = fileInput.files && fileInput.files[0];
+      const files = Array.from(fileInput.files || []);
       fileInput.value = "";
-      sendAttachmentFile(file);
+      sendFileBundle(files);
     });
 
     msgEl.addEventListener("paste", (e) => {
@@ -697,11 +942,11 @@
       if (!items || !items.length) return;
 
       for (const item of items) {
-        if (item.kind === "file" && item.type.startsWith("image/")) {
+        if (item.kind === "file" && (item.type.startsWith("image/") || item.type.startsWith("video/"))) {
           const file = item.getAsFile();
           if (!file) return;
           e.preventDefault();
-          sendImageFile(file);
+          sendMediaFiles([file]);
           return;
         }
       }
