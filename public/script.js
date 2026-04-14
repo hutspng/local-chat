@@ -239,6 +239,17 @@
     const CHUNK_SIZE = 256 * 1024;
     let uploadInProgress = false;
 
+    // Gera ou recupera ID único do dispositivo
+    function getOrCreateDeviceId() {
+      let deviceId = localStorage.getItem("chat_device_id");
+      if (!deviceId) {
+        deviceId = "dev_" + Date.now() + "_" + Math.random().toString(36).slice(2, 10);
+        localStorage.setItem("chat_device_id", deviceId);
+      }
+      return deviceId;
+    }
+    const deviceId = getOrCreateDeviceId();
+
     function setUploadProgress(visible, label = "", percent = 0) {
       uploadStatus.classList.toggle("show", visible);
       if (!visible) {
@@ -261,6 +272,8 @@
       ws.addEventListener("open", () => {
         setStatus(true, "online");
         addLine("[sistema] conectado", "system");
+        // Envia deviceId para registrar usuário
+        ws.send(JSON.stringify({ type: "set-device-id", deviceId }));
       });
 
       ws.addEventListener("close", () => {

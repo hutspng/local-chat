@@ -20,6 +20,7 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
 const clients = new Set();
+const activeUsers = new Map(); // deviceId -> Set of WebSocket connections
 const chatHistory = [];
 const MAX_HISTORY = 200;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -54,27 +55,11 @@ function publishChat(entry) {
 wss.on("connection", (ws) => {
   clients.add(ws);
   ws.incomingTransfers = new Map();
+  ws.deviceId = null;
+  let isNewUser = false;
 
-  if (chatHistory.length) {
-    ws.send(JSON.stringify({
-      type: "history",
-      messages: chatHistory
-    }));
-  }
-
-  ws.send(JSON.stringify({
-    type: "system",
-    text: `Conectado. Usuários online: ${clients.size}`,
-    at: nowTime()
-  }));
-
-  broadcast({
-    type: "system",
-    text: `Alguém entrou. Online: ${clients.size}`,
-    at: nowTime()
-  });
-
-  ws.on("message", (raw) => {
+  // Primeiro recebemos mensagem com deviceId
+  const tempListener = (raw) => {
     let data;
     try {
       data = JSON.parse(raw.toString());
@@ -82,7 +67,62 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    if (data.type === "chat") {
+    if (data.type === "set-device-id" && typeof data.deviceId === "string") {
+      const deviceId = String(data.deviceId).slice(0, 64);
+      ws.deviceId = deviceId;
+      ws.removeListener("message", tempListener);
+      ws.on("message", onMessage);
+
+      // Verificar se é novo usuário
+      if (!activeUsers.has(deviceId)) {
+        activeUsers.set(deviceId, new Set());
+        isNewUser = true;
+      }
+      activeUsers.get(deviceId).add(ws);
+
+      if (chatHistory.length) {
+        ws.send(JSON.stringify({
+          type: "history",
+          messages: chatHistory
+        }));
+      }
+
+      ws.send(JSON.stringify({
+        type: "system",
+        text: `Conectado. Usuários online: ${activeUsers.size}`,
+        at: nowTime()
+      }));
+
+      if (isNewUser) {
+        broadcast({
+          type: "system",
+          text: `Alguém entrou. Online: ${activeUsers.size}`,
+          at: nowTime()
+        });
+      }
+    }
+  };
+  ws.on("message", tempListener);
+
+  // Timeout de 5s para enviar deviceId
+  setTimeout(() => {
+    if (!ws.deviceId) ws.close();
+  }, 5000);
+
+  // Evento de fechamento de conexão
+  ws.on("close", () => handleClientClose(ws));
+});
+
+function onMessage(raw) {
+  const ws = this;
+  let data;
+  try {
+    data = JSON.parse(raw.toString());
+  } catch {
+    return;
+  }
+
+  if (data.type === "chat") {
       const name = String(data.name || "Anônimo").slice(0, 24);
       const text = String(data.text || "").slice(0, 500);
       const imageData = typeof data.imageData === "string" ? data.imageData : "";
@@ -256,24 +296,34 @@ wss.on("connection", (ws) => {
         at
       });
     }
-  });
+}
 
-  ws.on("close", () => {
-    clients.delete(ws);
-    if (ws.incomingTransfers) ws.incomingTransfers.clear();
+function handleClientClose(ws) {
+  if (!ws.deviceId) return;
 
-    if (clients.size === 0) {
-      chatHistory.length = 0;
-      return;
+  clients.delete(ws);
+  if (ws.incomingTransfers) ws.incomingTransfers.clear();
+
+  const userConnections = activeUsers.get(ws.deviceId);
+  if (userConnections) {
+    userConnections.delete(ws);
+    // Se não há mais conexões deste usuário, remove do mapa
+    if (userConnections.size === 0) {
+      activeUsers.delete(ws.deviceId);
+
+      if (clients.size === 0) {
+        chatHistory.length = 0;
+        return;
+      }
+
+      broadcast({
+        type: "system",
+        text: `Alguém saiu. Online: ${activeUsers.size}`,
+        at: nowTime()
+      });
     }
-
-    broadcast({
-      type: "system",
-      text: `Alguém saiu. Online: ${clients.size}`,
-      at: nowTime()
-    });
-  });
-});
+  }
+}
 
 server.listen(PORT, "0.0.0.0", () => {
   const ifaces = os.networkInterfaces();
