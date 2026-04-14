@@ -23,6 +23,7 @@ const clients = new Set();
 const activeUsers = new Map(); // deviceId -> Set of WebSocket connections
 const chatHistory = [];
 const MAX_HISTORY = 200;
+let messageIdCounter = 0;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
 const MAX_CHUNK_BASE64_CHARS = 500_000;
@@ -48,6 +49,7 @@ function pushChatHistory(entry) {
 }
 
 function publishChat(entry) {
+  entry.messageId = `msg_${++messageIdCounter}`;
   broadcast(entry);
   pushChatHistory(entry);
 }

@@ -48,57 +48,92 @@
     }
 
     function appendTextWithLinks(container, text) {
+      // Regex para URLs e mentões
       const urlRegex = /(https?:\/\/[^\s]+)/gi;
-      const matches = text.matchAll(urlRegex);
+      const mentionRegex = /(@[a-záéíóúãõâêôĉäëïöüñ\w-]+(?:\/\d+)?)/gi;
+      
+      // Combinar ambos em um único regex
+      const combined = /(?:(https?:\/\/[^\s]+)|(@[a-záéíóúãõâêôĉäëïöüñ\w-]+(?:\/\d+)?))/gi;
       let lastIndex = 0;
 
-      for (const match of matches) {
-        const urlText = match[0];
+      for (const match of text.matchAll(combined)) {
+        const fullMatch = match[0];
         const index = match.index ?? 0;
+        const url = match[1];
+        const mention = match[2];
 
+        // Adicionar texto antes do match
         if (index > lastIndex) {
           container.appendChild(document.createTextNode(text.slice(lastIndex, index)));
         }
 
-        let safeUrl = "";
-        try {
-          const parsed = new URL(urlText);
-          if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-            safeUrl = parsed.href;
+        if (url) {
+          // Processa URL
+          let safeUrl = "";
+          try {
+            const parsed = new URL(url);
+            if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+              safeUrl = parsed.href;
+            }
+          } catch {
+            safeUrl = "";
           }
-        } catch {
-          safeUrl = "";
+
+          if (safeUrl) {
+            const a = document.createElement("a");
+            a.className = "chatLink";
+            a.href = safeUrl;
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            a.textContent = url;
+            container.appendChild(a);
+          } else {
+            container.appendChild(document.createTextNode(url));
+          }
+        } else if (mention) {
+          // Processa menção
+          const mentionId = parseMention(mention);
+          if (mentionId) {
+            const a = document.createElement("a");
+            a.className = "chatMention";
+            a.href = "#";
+            a.textContent = mention;
+            a.addEventListener("click", (e) => {
+              e.preventDefault();
+              scrollToMessageAndBlink(mentionId);
+            });
+            container.appendChild(a);
+          } else {
+            container.appendChild(document.createTextNode(mention));
+          }
         }
 
-        if (safeUrl) {
-          const a = document.createElement("a");
-          a.className = "chatLink";
-          a.href = safeUrl;
-          a.target = "_blank";
-          a.rel = "noopener noreferrer";
-          a.textContent = urlText;
-          container.appendChild(a);
-        } else {
-          container.appendChild(document.createTextNode(urlText));
-        }
-
-        lastIndex = index + urlText.length;
+        lastIndex = index + fullMatch.length;
       }
 
+      // Adicionar texto restante
       if (lastIndex < text.length) {
         container.appendChild(document.createTextNode(text.slice(lastIndex)));
       }
     }
 
-    function addChatLine({ at = "", name = "Anônimo", text = "", imageData = "", imageName = "", fileData = "", fileName = "", fileType = "", fileSize = 0 }) {
+    function addChatLine({ at = "", name = "Anônimo", text = "", imageData = "", imageName = "", fileData = "", fileName = "", fileType = "", fileSize = 0, messageId = "" }) {
       const div = document.createElement("div");
       div.className = "msgLine chat";
+      if (messageId) div.dataset.messageId = messageId;
       const hasText = !!String(text || "").trim();
       const hasImage = !!imageData;
       const hasFile = !!fileData;
 
       if (!hasText && hasImage) {
         div.classList.add("imageOnly");
+      }
+
+      // Rastrear mensagem
+      if (messageId) {
+        allMessages.push({ messageId, name, at, div });
+        if (!messagesByAuthor[name]) messagesByAuthor[name] = [];
+        messagesByAuthor[name].push(messageId);
       }
 
       const meta = document.createElement("div");
@@ -227,6 +262,69 @@
     } else {
       namePick.value = myName;
       enableChatUI(true);
+    }
+
+    // ===== Funções de menção =====
+    function parseMention(mentionStr) {
+      // Parse @nome/número ou @nome
+      const match = mentionStr.match(/^@([a-záéíóúãõâêôĉäëïöüñ\w-]+)(?:\/(\d+))?$/i);
+      if (!match) return null;
+      const name = match[1];
+      const backCount = parseInt(match[2]) || 1;
+      if (!messagesByAuthor[name]) return null;
+      const messages = messagesByAuthor[name];
+      const idx = messages.length - backCount;
+      if (idx < 0) return null;
+      return messages[idx];
+    }
+
+    function scrollToMessageAndBlink(messageId) {
+      const msg = allMessages.find(m => m.messageId === messageId);
+      if (!msg) return;
+      msg.div.scrollIntoView({ behavior: "smooth", block: "center" });
+      msg.div.classList.add("mention-blink");
+      setTimeout(() => msg.div.classList.remove("mention-blink"), 1200);
+    }
+
+    function showMentionAutocomplete(letter) {
+      const autocompleteDiv = document.getElementById("mentionAutocomplete") || createMentionAutocomplete();
+      const authors = Object.keys(messagesByAuthor).filter(n => n.toLowerCase().startsWith(letter.toLowerCase()));
+      if (authors.length === 0) {
+        autocompleteDiv.style.display = "none";
+        return;
+      }
+      autocompleteDiv.innerHTML = authors.map(name => 
+        `<div class="mention-option" data-name="${name}">${name}</div>`
+      ).join("");
+      autocompleteDiv.style.display = "block";
+    }
+
+    function createMentionAutocomplete() {
+      const div = document.createElement("div");
+      div.id = "mentionAutocomplete";
+      div.className = "mention-autocomplete";
+      msgEl.parentElement.appendChild(div);
+      div.addEventListener("click", (e) => {
+        if (e.target.dataset.name) {
+          insertMention(e.target.dataset.name);
+        }
+      });
+      return div;
+    }
+
+    function insertMention(name) {
+      const before = msgEl.value.lastIndexOf("@");
+      if (before === -1) return;
+      msgEl.value = msgEl.value.substring(0, before) + `@${name}/ `;
+      msgEl.focus();
+      document.getElementById("mentionAutocomplete").style.display = "none";
+    }
+
+    function handleMessageContext(messageId, name) {
+      const currentText = msgEl.value;
+      const backCount = (messagesByAuthor[name] ? messagesByAuthor[name].length - 1 : 0);
+      msgEl.value = currentText + (currentText ? " " : "") + `@${name}/${backCount}`;
+      msgEl.focus();
     }
 
     // ===== WebSocket =====
@@ -464,6 +562,10 @@
     let currentPanX = 0;
     let currentPanY = 0;
 
+    // ===== Rastreamento de menções =====
+    const allMessages = []; // { messageId, name, at, div }
+    const messagesByAuthor = {}; // { name -> [ messageIds ] }
+
     function updateImageTransform() {
       const totalScale = viewerBaseScale * viewerZoom;
       const translate = `translate(${currentPanX}px, ${currentPanY}px)`;
@@ -531,6 +633,35 @@
     sendBtn.addEventListener("click", send);
     msgEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter") send();
+    });
+
+    msgEl.addEventListener("input", () => {
+      const value = msgEl.value;
+      const atPos = value.lastIndexOf("@");
+      if (atPos === -1) {
+        const autocomplete = document.getElementById("mentionAutocomplete");
+        if (autocomplete) autocomplete.style.display = "none";
+        return;
+      }
+      const afterAt = value.substring(atPos + 1);
+      const letter = afterAt.match(/^[a-záéíóúãõâêôĉäëïöüñ]/i);
+      if (letter && !afterAt.includes(" ") && !afterAt.includes("/")) {
+        showMentionAutocomplete(letter[0]);
+      } else {
+        const autocomplete = document.getElementById("mentionAutocomplete");
+        if (autocomplete) autocomplete.style.display = "none";
+      }
+    });
+
+    // Context menu para mencionar
+    log.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      const msgLine = e.target.closest(".msgLine");
+      if (!msgLine || !msgLine.dataset.messageId) return;
+      const messageId = msgLine.dataset.messageId;
+      const msg = allMessages.find(m => m.messageId === messageId);
+      if (!msg) return;
+      handleMessageContext(messageId, msg.name);
     });
 
     pickImageBtn.addEventListener("click", () => {
