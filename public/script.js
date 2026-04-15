@@ -336,7 +336,7 @@
       enableChatUI(true);
 
       // Só conecta depois do nome definido
-      if (!ws || ws.readyState === WebSocket.CLOSED) connect();
+      if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) connect();
     }
 
     enterChat.addEventListener("click", confirmName);
@@ -436,6 +436,7 @@
     const wsUrl = `${proto}//${location.host}`;
     let ws;
     let historyApplied = false;
+    let reconnectTimer = null;
     const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
     const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
     const MAX_FILE_BYTES = 1024 * 1024 * 1024;
@@ -563,6 +564,12 @@
 
     function connect() {
       if (!myName) return;
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
 
       setStatus(false, "conectando...");
       ws = new WebSocket(wsUrl);
@@ -578,7 +585,11 @@
       ws.addEventListener("close", () => {
         setStatus(false, "offline (tentando reconectar...)");
         addLine("[sistema] desconectou", "system");
-        setTimeout(connect, 800);
+        reconnectTimer = setTimeout(connect, 1200);
+      });
+
+      ws.addEventListener("error", () => {
+        setStatus(false, "offline (erro de conexão)");
       });
 
       ws.addEventListener("message", (ev) => {

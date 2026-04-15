@@ -3,13 +3,13 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Chat Local (LAN)</title>
-    <link rel="stylesheet" href="style.css" />
+    <title>Chat Online</title>
+    <link rel="stylesheet" href="/style.css?v=20260415" />
 </head>
 <body>
   <div class="card">
     <header>
-      <strong>Chat Local (LAN)</strong>
+      <strong>Chat Online</strong>
       <div class="right">
         <span class="statusDot" id="dot"></span>
         <span id="status">desconectado</span>
@@ -38,14 +38,14 @@
       <aside>
         <div class="box">
           <div class="label">Dica de link</div>
-          <div class="value" id="linkHint">http://IP_DO_SERVIDOR:3000</div>
+          <div class="value" id="linkHint">https://seu-app.onrender.com</div>
         </div>
         <div class="box small">
-          <div><strong>Como usar na rede:</strong></div>
-          <div>1) Rode o servidor no PC “host”.</div>
-          <div>2) Descubra o IP dele (ex: 192.168.0.10).</div>
-          <div>3) Em outro PC, abra: <em>http://IP:3000</em></div>
-          <div style="margin-top:8px;"><strong>Obs:</strong> libere a porta 3000 no firewall do host.</div>
+          <div><strong>Como usar online:</strong></div>
+          <div>1) Abra o mesmo link em todos os dispositivos.</div>
+          <div>2) Cada pessoa escolhe um nome e entra no chat.</div>
+          <div>3) O status deve ficar como online.</div>
+          <div style="margin-top:8px;"><strong>Obs:</strong> no plano grátis, o Render pode demorar alguns segundos para acordar.</div>
         </div>
         <div class="box sysBox">
           <div class="label">Chat do sistema</div>
@@ -78,6 +78,6 @@
   </div>
 
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-    <script src="script.js"></script>
+    <script src="/script.js?v=20260415"></script>
 </body>
 </html>

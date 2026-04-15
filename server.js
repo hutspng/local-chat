@@ -35,6 +35,7 @@ const MAX_CHUNK_BASE64_CHARS = 500_000;
 const TRANSFER_TIMEOUT_MS = 5 * 60 * 1000;
 const MAX_MESSAGE_LINES = 100;
 const MAX_MESSAGE_CHARS = 10000;
+const HEARTBEAT_INTERVAL_MS = 30_000;
 
 function normalizeMessageText(raw) {
   const limitedChars = String(raw || "").slice(0, MAX_MESSAGE_CHARS);
@@ -71,10 +72,15 @@ function publishChat(entry) {
 
 wss.on("connection", (ws) => {
   clients.add(ws);
+  ws.isAlive = true;
   ws.incomingTransfers = new Map();
   ws.incomingBundles = new Map();
   ws.deviceId = null;
   let isNewUser = false;
+
+  ws.on("pong", () => {
+    ws.isAlive = true;
+  });
 
   // Primeiro recebemos mensagem com deviceId
   const tempListener = (raw) => {
@@ -417,11 +423,11 @@ function onMessage(raw) {
 }
 
 function handleClientClose(ws) {
-  if (!ws.deviceId) return;
-
   clients.delete(ws);
   if (ws.incomingTransfers) ws.incomingTransfers.clear();
   if (ws.incomingBundles) ws.incomingBundles.clear();
+
+  if (!ws.deviceId) return;
 
   const userConnections = activeUsers.get(ws.deviceId);
   if (userConnections) {
@@ -443,6 +449,27 @@ function handleClientClose(ws) {
     }
   }
 }
+
+const heartbeatTimer = setInterval(() => {
+  for (const ws of clients) {
+    if (ws.readyState !== WebSocket.OPEN) {
+      clients.delete(ws);
+      continue;
+    }
+
+    if (!ws.isAlive) {
+      ws.terminate();
+      continue;
+    }
+
+    ws.isAlive = false;
+    ws.ping();
+  }
+}, HEARTBEAT_INTERVAL_MS);
+
+wss.on("close", () => {
+  clearInterval(heartbeatTimer);
+});
 
 server.listen(PORT, "0.0.0.0", () => {
   const publicBaseUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
