@@ -16,6 +16,10 @@ const PORT = process.env.PORT || 3000;
 const app = express();
 app.use(express.static(path.join(__dirname, "public")));
 
+app.get("/health", (_req, res) => {
+  res.status(200).json({ ok: true });
+});
+
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
@@ -441,6 +445,7 @@ function handleClientClose(ws) {
 }
 
 server.listen(PORT, "0.0.0.0", () => {
+  const publicBaseUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
   const ifaces = os.networkInterfaces();
   const ips = [];
   for (const name of Object.keys(ifaces)) {
@@ -449,7 +454,8 @@ server.listen(PORT, "0.0.0.0", () => {
     }
   }
 
-  console.log(`Chat local rodando na porta ${PORT}`);
+  console.log(`Chat online rodando na porta ${PORT}`);
+  console.log(`URL pública (se disponível): ${publicBaseUrl}`);
   if (ips.length) {
     console.log("Acesse de outros PCs na rede usando um destes links:");
     for (const ip of ips) console.log(`  http://${ip}:${PORT}`);
