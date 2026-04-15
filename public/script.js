@@ -142,6 +142,7 @@
       const hasImage = !!imageData;
       const hasVideo = !!videoData;
       const hasFile = !!fileData;
+      const hasFileVideo = hasFile && /^video\//i.test(String(fileType || ""));
       const safeBundleFiles = Array.isArray(bundleFiles)
         ? bundleFiles.filter((item) => item && typeof item.fileData === "string")
         : [];
@@ -212,7 +213,19 @@
         }
       }
 
-      if (hasFile) {
+      if (hasFileVideo) {
+        const fileVideo = document.createElement("video");
+        fileVideo.className = "chatVideo";
+        fileVideo.src = fileData;
+        fileVideo.controls = true;
+        fileVideo.preload = "metadata";
+        div.appendChild(fileVideo);
+
+        const caption = document.createElement("div");
+        caption.className = "imageCaption";
+        caption.textContent = fileName || "video";
+        div.appendChild(caption);
+      } else if (hasFile) {
         const fileCard = document.createElement("div");
         fileCard.className = "fileCard";
 
