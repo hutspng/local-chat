@@ -12,9 +12,18 @@ const express = require("express");
 const WebSocket = require("ws");
 
 const PORT = process.env.PORT || 3000;
+const CHAT_HOSTNAME = String(process.env.CHAT_HOSTNAME || "local-chat.lan").trim() || "local-chat.lan";
 
 const app = express();
 app.use(express.static(path.join(__dirname, "public")));
+
+app.get("/chat-config", (req, res) => {
+  res.json({
+    port: Number(PORT),
+    preferredHostname: CHAT_HOSTNAME,
+    preferredOrigin: `http://${CHAT_HOSTNAME}:${PORT}`
+  });
+});
 
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
@@ -38,6 +47,11 @@ function normalizeMessageText(raw) {
   const lines = normalizedBreaks.split("\n");
   if (lines.length <= MAX_MESSAGE_LINES) return normalizedBreaks;
   return lines.slice(0, MAX_MESSAGE_LINES).join("\n");
+}
+
+function normalizeName(raw) {
+  const compact = String(raw || "Anônimo").trim().replace(/\s+/g, "_").slice(0, 24);
+  return compact || "Anônimo";
 }
 
 function nowTime() {
@@ -137,7 +151,7 @@ function onMessage(raw) {
   }
 
   if (data.type === "chat") {
-      const name = String(data.name || "Anônimo").slice(0, 24);
+      const name = normalizeName(data.name);
       const text = normalizeMessageText(data.text);
       const imageData = typeof data.imageData === "string" ? data.imageData : "";
       const imageName = String(data.imageName || "").slice(0, 80);
@@ -210,7 +224,7 @@ function onMessage(raw) {
 
     if (data.type === "bundle-start") {
       const bundleId = String(data.bundleId || "").slice(0, 64);
-      const name = String(data.name || "Anônimo").slice(0, 24);
+      const name = normalizeName(data.name);
       const totalInBundle = Number(data.totalInBundle);
 
       if (!bundleId) return;
@@ -229,7 +243,7 @@ function onMessage(raw) {
     if (data.type === "file-start") {
       const transferId = String(data.transferId || "").slice(0, 64);
       const kind = data.kind === "image" || data.kind === "video" ? data.kind : "file";
-      const name = String(data.name || "Anônimo").slice(0, 24);
+      const name = normalizeName(data.name);
       const fileName = String(data.fileName || "arquivo").slice(0, 120);
       const fileType = String(data.fileType || (kind === "image" ? "image/png" : kind === "video" ? "video/mp4" : "application/octet-stream")).slice(0, 80);
       const fileSize = Number(data.fileSize) || 0;
@@ -450,9 +464,11 @@ server.listen(PORT, "0.0.0.0", () => {
   }
 
   console.log(`Chat local rodando na porta ${PORT}`);
+  console.log(`Hostname preferido: http://${CHAT_HOSTNAME}:${PORT}`);
   if (ips.length) {
     console.log("Acesse de outros PCs na rede usando um destes links:");
     for (const ip of ips) console.log(`  http://${ip}:${PORT}`);
+    console.log(`Se configurar DNS/hosts da rede, use sempre: http://${CHAT_HOSTNAME}:${PORT}`);
   } else {
     console.log(`Acesse: http://localhost:${PORT}`);
   }

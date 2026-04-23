@@ -14,6 +14,7 @@
     const linkHint = document.getElementById("linkHint");
     const imageViewer = document.getElementById("imageViewer");
     const viewerClose = document.getElementById("viewerClose");
+    const viewerDownload = document.getElementById("viewerDownload");
     const viewerStage = document.getElementById("viewerStage");
     const viewerImage = document.getElementById("viewerImage");
 
@@ -23,12 +24,30 @@
 
     // mostra um "hint" com o host atual
     linkHint.textContent = `${location.origin}`;
+    fetch("/chat-config")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((cfg) => {
+        if (cfg && typeof cfg.preferredOrigin === "string" && cfg.preferredOrigin) {
+          linkHint.textContent = cfg.preferredOrigin;
+        }
+      })
+      .catch(() => {
+        // mantém fallback para a origem atual
+      });
 
     function sanitizeName(s) {
       return (s || "")
         .trim()
         .replace(/\s+/g, " ")
         .slice(0, 24);
+    }
+
+    function hasWhitespace(value) {
+      return /\s/.test(String(value || ""));
+    }
+
+    function toMentionSafeName(value) {
+      return String(value || "").trim().replace(/\s+/g, "_").slice(0, 24);
     }
 
     function formatBytes(bytes) {
@@ -328,7 +347,22 @@
         namePick.focus();
         return;
       }
-      myName = picked;
+
+      let finalName = picked;
+      if (hasWhitespace(finalName)) {
+        const shouldReplace = window.confirm("Seu nome contém espaços. Deseja substituir espaços por _ para menções funcionarem?");
+        if (shouldReplace) {
+          finalName = toMentionSafeName(finalName);
+        } else {
+          addLine("[sistema] nome inválido: use um nome sem espaços.", "system");
+          window.alert("Por favor, escolha um nome sem espaços.");
+          namePick.focus();
+          namePick.select();
+          return;
+        }
+      }
+
+      myName = finalName;
       localStorage.setItem("chat_name", myName);
 
       namePick.value = myName;
@@ -347,8 +381,13 @@
     if (!myName) {
       showNameModal();
     } else {
-      namePick.value = myName;
-      enableChatUI(true);
+      if (hasWhitespace(myName)) {
+        showNameModal();
+        addLine("[sistema] seu nome salvo contém espaços. Ajuste para continuar.", "system");
+      } else {
+        namePick.value = myName;
+        enableChatUI(true);
+      }
     }
 
     // ===== Funções de menção =====
@@ -867,6 +906,30 @@
       applyViewerScale();
     }
 
+    function getImageExtensionFromSrc(src) {
+      const match = String(src || "").match(/^data:image\/([a-zA-Z0-9.+-]+);base64,/i);
+      if (!match) return "png";
+      const subtype = match[1].toLowerCase();
+      if (subtype === "jpeg") return "jpg";
+      if (subtype === "svg+xml") return "svg";
+      return subtype.replace(/[^a-z0-9]/g, "") || "png";
+    }
+
+    function downloadCurrentViewerImage() {
+      const src = String(viewerImage.getAttribute("src") || "");
+      if (!src) return;
+      const ext = getImageExtensionFromSrc(src);
+      const fileName = `imagem-${Date.now()}.${ext}`;
+
+      const link = document.createElement("a");
+      link.href = src;
+      link.download = fileName;
+      link.rel = "noopener noreferrer";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    }
+
     sendBtn.addEventListener("click", send);
     msgEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
@@ -953,6 +1016,7 @@
     });
 
     viewerClose.addEventListener("click", closeImageViewer);
+    viewerDownload.addEventListener("click", downloadCurrentViewerImage);
     imageViewer.addEventListener("click", (e) => {
       if (e.target === imageViewer) closeImageViewer();
     });
