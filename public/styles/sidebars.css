@@ -1,0 +1,130 @@
+    aside{
+      padding:12px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      min-height:0;
+      overflow:auto;
+    }
+    .box{
+      border:1px solid var(--border);
+      border-radius:12px;
+      padding:10px;
+      background:rgba(255,255,255,.03);
+    }
+    .peopleBox{
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      min-height:220px;
+    }
+    .peopleList{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      overflow:auto;
+      padding-right:2px;
+    }
+    .peopleItem{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      border:1px solid rgba(255,255,255,.08);
+      border-radius:10px;
+      background:rgba(255,255,255,.02);
+      padding:6px;
+    }
+    .peopleDot{
+      width:14px;
+      height:14px;
+      min-width:14px;
+      border-radius:50%;
+      border:1px solid rgba(255,255,255,.28);
+      background:#ff4d6d;
+      padding:0;
+      cursor:default;
+    }
+    .peopleDot.active{
+      background:#32d296;
+    }
+    .peopleDot.pokeable{
+      cursor:pointer;
+      box-shadow:0 0 0 0 rgba(255,77,109,.55);
+      animation: pokePulse 1.3s ease-out infinite;
+    }
+    .peopleDot.pokeable:hover{
+      transform:scale(1.08);
+    }
+    @keyframes pokePulse{
+      0%{ box-shadow:0 0 0 0 rgba(255,77,109,.5); }
+      70%{ box-shadow:0 0 0 7px rgba(255,77,109,0); }
+      100%{ box-shadow:0 0 0 0 rgba(255,77,109,0); }
+    }
+    .peopleName{
+      flex:1;
+      min-width:0;
+      padding:5px 8px;
+      border-radius:8px;
+      border:1px solid transparent;
+      background:transparent;
+      color:var(--text);
+      font-size:12px;
+      font-weight:700;
+      text-align:left;
+      cursor:pointer;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .peopleName:hover{
+      border-color:rgba(106,166,255,.35);
+      background:rgba(106,166,255,.16);
+    }
+    .peopleState{
+      font-size:10px;
+      color:var(--muted);
+      text-transform:uppercase;
+      letter-spacing:.3px;
+      white-space:nowrap;
+    }
+    .box .label{ color:var(--muted); font-size:12px; }
+    .box .value{ margin-top:6px; font-weight:800; }
+    .small{ color:var(--muted); font-size:12px; line-height:1.35; }
+
+    .sysBox{
+      display:flex;
+      flex-direction:column;
+      min-height: 220px;
+    }
+
+    .systemLog{
+      margin-top:8px;
+      flex:1;
+      min-height: 170px;
+      max-height: 280px;
+      overflow:auto;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      padding:8px;
+      border:1px dashed rgba(255,255,255,.14);
+      border-radius:10px;
+      background:rgba(255,255,255,.02);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size:11px;
+      line-height:1.35;
+      color:var(--muted);
+
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,.26) transparent;
+    }
+
+    .sysLine{
+      padding:7px 8px;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,.08);
+      background:rgba(255,255,255,.02);
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+

@@ -1,0 +1,390 @@
+    :root{
+      --bg:#0b1220; --panel:#111a2e; --text:#e7eefc; --muted:#9bb0d1;
+      --border:rgba(255,255,255,.10); --accent:#6aa6ff;
+    }
+    *{ box-sizing:border-box; }
+    body{
+      margin:0; background:radial-gradient(900px 600px at 20% 0%, #16264a 0%, var(--bg) 60%);
+      color:var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      min-height:100vh; display:grid; place-items:center; padding:16px;
+      /* background-image: url("1 - prima.jpg");  */
+      background-size: cover;
+      background-position: center;
+    }
+    .card{
+      width:min(920px, 96vw);
+      height:min(92vh, 760px);
+      background:rgba(17,26,46,.92);
+      border:1px solid var(--border);
+      border-radius:16px;
+      box-shadow: 0 18px 60px rgba(0,0,0,.55);
+      overflow:hidden;
+      position: relative;
+      display:flex;
+      flex-direction:column;
+    }
+    header{
+      padding:12px 14px;
+      display:flex; gap:10px; align-items:center; justify-content:space-between;
+      border-bottom:1px solid var(--border);
+    }
+    header strong{ letter-spacing:.2px; }
+    header .right{ display:flex; gap:10px; align-items:center; color:var(--muted); font-size:12px; }
+    .statusDot{ width:10px; height:10px; border-radius:50%; background:#ff4d6d; }
+    .statusDot.on{ background:#32d296; }
+    .main{
+      display:grid;
+      grid-template-columns: 240px 1fr 280px;
+      gap:0;
+      min-height: 0;
+      flex:1;
+    }
+    .peoplePane{
+      padding:12px;
+      border-right:1px solid var(--border);
+      min-height:0;
+      overflow:auto;
+    }
+    .chat{
+      padding:12px;
+      border-right:1px solid var(--border);
+      display:flex; flex-direction:column; gap:10px;
+      min-width: 0;
+      min-height: 0;
+      position:relative;
+    }
+
+    /* ✅ log como "lista" vertical (cada mensagem em uma linha/bolha) */
+    .log{
+      flex:1;
+      min-height:0;
+      background:rgba(0,0,0,.18);
+      border:1px solid var(--border);
+      border-radius:12px;
+      padding:10px;
+      overflow:auto;
+
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      align-items: stretch;
+
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size:12px;
+      line-height:1.35;
+      white-space:normal; /* importante: não colar tudo numa linha */
+
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,.26) transparent;
+    }
+
+    .log::-webkit-scrollbar,
+    .systemLog::-webkit-scrollbar{
+      width:8px;
+      height:8px;
+    }
+
+    .log::-webkit-scrollbar-track,
+    .systemLog::-webkit-scrollbar-track{
+      background: transparent;
+    }
+
+    .log::-webkit-scrollbar-thumb,
+    .systemLog::-webkit-scrollbar-thumb{
+      background: rgba(255,255,255,.22);
+      border-radius: 999px;
+      border: 2px solid transparent;
+      background-clip: content-box;
+    }
+
+    .log::-webkit-scrollbar-thumb:hover,
+    .systemLog::-webkit-scrollbar-thumb:hover{
+      background: rgba(255,255,255,.34);
+      background-clip: content-box;
+    }
+
+    .msgLine{
+      display:flex;
+      flex-direction:column;
+      flex: 0 0 auto;
+      position: relative;
+      width:100%;
+      padding:8px 10px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.08);
+      background: rgba(255,255,255,.03);
+      color: var(--text);
+      overflow: hidden;
+
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+
+    .msgLine.system{
+      color: var(--muted);
+      border-style: dashed;
+      background: rgba(255,255,255,.02);
+    }
+
+    .msgMeta{
+      color: rgba(231,238,252,.75);
+    }
+    .msgText{
+      color: var(--text);
+      margin-top:4px;
+      white-space: pre-wrap;
+    }
+
+    input,
+    textarea{
+      border:1px solid var(--border);
+      background:rgba(255,255,255,.04);
+      color:var(--text);
+      border-radius:12px;
+      padding:10px 12px;
+      outline:none;
+      min-width: 0;
+    }
+
+    input:focus,
+    textarea:focus{ border-color: rgba(106,166,255,.55); }
+
+    #msg{
+      flex:1;
+      resize: vertical;
+      min-height: 42px;
+      max-height: 40vh;
+      line-height: 1.35;
+      font-family: inherit;
+    }
+
+    .chatLink{
+      color:#9dc4ff;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    .chatImage{
+      display:block;
+      margin-top:8px;
+      max-width: 100%;
+      width: auto;
+      height: auto;
+      max-height: 220px;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,.12);
+      object-fit:contain;
+    }
+
+    .chatVideo{
+      display:block;
+      margin-top:8px;
+      width:100%;
+      max-width:560px;
+      max-height:320px;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,.12);
+      background:#000;
+    }
+
+    .msgLine.imageOnly{
+      width: auto;
+      max-width: min(100%, 260px);
+      align-self: flex-start;
+    }
+
+    .msgLine.imageOnly .chatImage{
+      width: 100%;
+      max-width: 240px;
+      max-height: none;
+    }
+
+    .imageCaption{
+      margin-top:4px;
+      color:var(--muted);
+      font-size:11px;
+    }
+
+    .fileCard{
+      margin-top:8px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      padding:8px;
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:10px;
+      background:rgba(255,255,255,.03);
+    }
+
+    .fileMeta{
+      min-width:0;
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+    }
+
+    .fileName{
+      font-size:12px;
+      color:var(--text);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      max-width:240px;
+    }
+
+    .fileInfo{
+      font-size:11px;
+      color:var(--muted);
+    }
+
+    .fileDownloadBtn{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      padding:7px 10px;
+      border-radius:9px;
+      border:1px solid var(--border);
+      color:var(--text);
+      background:rgba(106,166,255,.16);
+      text-decoration:none;
+      font-size:11px;
+      font-weight:700;
+      white-space:nowrap;
+    }
+
+    .fileDownloadBtn:hover{
+      background:rgba(106,166,255,.24);
+    }
+
+    .bundleCard{
+      margin-top:8px;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      padding:10px;
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:10px;
+      background:rgba(255,255,255,.03);
+    }
+
+    .bundleActions{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+
+    .bundlePopup{
+      position:fixed;
+      inset:0;
+      display:none;
+      place-items:center;
+      z-index:1400;
+      background:rgba(2,6,16,.78);
+      padding:16px;
+    }
+
+    .bundlePopup.show{
+      display:grid;
+    }
+
+    .bundlePopupCard{
+      width:min(720px, 95vw);
+      max-height:85vh;
+      overflow:hidden;
+      border-radius:14px;
+      border:1px solid var(--border);
+      background:rgba(17,26,46,.96);
+      display:flex;
+      flex-direction:column;
+    }
+
+    .bundlePopupHeader{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      padding:10px 12px;
+      border-bottom:1px solid rgba(255,255,255,.08);
+    }
+
+    .bundlePopupList{
+      padding:10px;
+      overflow:auto;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
+
+    .bundlePopupItem{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      padding:8px;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,.08);
+      background:rgba(255,255,255,.02);
+    }
+
+    .bundlePopupInfo{
+      min-width:0;
+      color:var(--text);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    .form{
+      display:flex; gap:10px;
+      min-width: 0;
+       position:relative;
+    }
+
+    .uploadStatus{
+      display:none;
+      margin-top:2px;
+      padding:8px 10px;
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:10px;
+      background:rgba(255,255,255,.03);
+    }
+
+    .uploadStatus.show{
+      display:block;
+    }
+
+    .uploadLabel{
+      font-size:11px;
+      color:var(--muted);
+      margin-bottom:6px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    .uploadBarTrack{
+      height:8px;
+      border-radius:999px;
+      background:rgba(255,255,255,.10);
+      overflow:hidden;
+    }
+
+    .uploadBarFill{
+      height:100%;
+      width:0%;
+      border-radius:999px;
+      background:linear-gradient(90deg, #64c6ff 0%, #75a9ff 100%);
+      transition:width .12s linear;
+    }
+    button{
+      border:1px solid var(--border);
+      background:rgba(106,166,255,.16);
+      color:var(--text);
+      border-radius:12px;
+      padding:10px 12px;
+      font-weight:800;
+      cursor:pointer;
+      white-space: nowrap;
+
+    button:hover{ background:rgba(106,166,255,.24); }
+    button:disabled{ opacity:.55; cursor:not-allowed; }

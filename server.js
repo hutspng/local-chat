@@ -41,17 +41,17 @@ const TRANSFER_TIMEOUT_MS = 5 * 60 * 1000;
 const MAX_MESSAGE_LINES = 100;
 const MAX_MESSAGE_CHARS = 10000;
 
+function normalizeName(raw) {
+  const compact = String(raw || "Anônimo").trim().replace(/\s+/g, "_").slice(0, 24);
+  return compact || "Anônimo";
+}
+
 function normalizeMessageText(raw) {
   const limitedChars = String(raw || "").slice(0, MAX_MESSAGE_CHARS);
   const normalizedBreaks = limitedChars.replace(/\r\n/g, "\n");
   const lines = normalizedBreaks.split("\n");
   if (lines.length <= MAX_MESSAGE_LINES) return normalizedBreaks;
   return lines.slice(0, MAX_MESSAGE_LINES).join("\n");
-}
-
-function normalizeName(raw) {
-  const compact = String(raw || "Anônimo").trim().replace(/\s+/g, "_").slice(0, 24);
-  return compact || "Anônimo";
 }
 
 function nowTime() {
@@ -79,11 +79,50 @@ function publishChat(entry) {
   pushChatHistory(entry);
 }
 
+function buildPeopleList() {
+  const people = [];
+  for (const [deviceId, sockets] of activeUsers.entries()) {
+    let name = "Anônimo";
+    let tabActive = false;
+
+    for (const socket of sockets) {
+      if (!socket) continue;
+      if (socket.userName) name = socket.userName;
+      if (socket.tabActive) tabActive = true;
+    }
+
+    people.push({
+      deviceId,
+      name,
+      tabActive,
+      connections: sockets.size
+    });
+  }
+
+  people.sort((a, b) => {
+    if (a.tabActive !== b.tabActive) return a.tabActive ? -1 : 1;
+    return a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" });
+  });
+
+  return people;
+}
+
+function broadcastPeopleList() {
+  broadcast({
+    type: "people-list",
+    people: buildPeopleList(),
+    at: nowTime()
+  });
+}
+
 wss.on("connection", (ws) => {
   clients.add(ws);
   ws.incomingTransfers = new Map();
   ws.incomingBundles = new Map();
   ws.deviceId = null;
+  ws.userName = "Anônimo";
+  ws.tabActive = true;
+  ws.lastPokeAt = 0;
   let isNewUser = false;
 
   // Primeiro recebemos mensagem com deviceId
@@ -97,7 +136,11 @@ wss.on("connection", (ws) => {
 
     if (data.type === "set-device-id" && typeof data.deviceId === "string") {
       const deviceId = String(data.deviceId).slice(0, 64);
+      const userName = normalizeName(data.name);
+      const tabActive = typeof data.tabActive === "boolean" ? data.tabActive : true;
       ws.deviceId = deviceId;
+      ws.userName = userName;
+      ws.tabActive = tabActive;
       ws.removeListener("message", tempListener);
       ws.on("message", onMessage);
 
@@ -128,6 +171,8 @@ wss.on("connection", (ws) => {
           at: nowTime()
         });
       }
+
+      broadcastPeopleList();
     }
   };
   ws.on("message", tempListener);
@@ -151,7 +196,7 @@ function onMessage(raw) {
   }
 
   if (data.type === "chat") {
-      const name = normalizeName(data.name);
+    const name = normalizeName(data.name || ws.userName);
       const text = normalizeMessageText(data.text);
       const imageData = typeof data.imageData === "string" ? data.imageData : "";
       const imageName = String(data.imageName || "").slice(0, 80);
@@ -219,6 +264,57 @@ function onMessage(raw) {
         bundleFiles: hasBundle ? bundleFiles : [],
         at
       });
+      return;
+    }
+
+    if (data.type === "presence-update") {
+      const nextName = normalizeName(data.name || ws.userName);
+      const nextTabActive = typeof data.tabActive === "boolean" ? data.tabActive : ws.tabActive;
+      const changed = nextName !== ws.userName || nextTabActive !== ws.tabActive;
+
+      ws.userName = nextName;
+      ws.tabActive = nextTabActive;
+
+      if (changed || data.force) {
+        broadcastPeopleList();
+      }
+      return;
+    }
+
+    if (data.type === "poke-user") {
+      const targetDeviceId = String(data.targetDeviceId || "").slice(0, 64);
+      if (!targetDeviceId) return;
+      if (targetDeviceId === ws.deviceId) return;
+
+      const targetSockets = activeUsers.get(targetDeviceId);
+      if (!targetSockets || targetSockets.size === 0) return;
+
+      let targetActive = false;
+      for (const targetSocket of targetSockets) {
+        if (targetSocket && targetSocket.tabActive) {
+          targetActive = true;
+          break;
+        }
+      }
+      if (targetActive) return;
+
+      const now = Date.now();
+      if (now - Number(ws.lastPokeAt || 0) < 1500) return;
+      ws.lastPokeAt = now;
+
+      const fromName = normalizeName(ws.userName);
+      const payload = JSON.stringify({
+        type: "poke",
+        fromName,
+        fromDeviceId: ws.deviceId,
+        at: nowTime()
+      });
+
+      for (const targetSocket of targetSockets) {
+        if (targetSocket.readyState === WebSocket.OPEN) {
+          targetSocket.send(payload);
+        }
+      }
       return;
     }
 
@@ -427,11 +523,10 @@ function onMessage(raw) {
 }
 
 function handleClientClose(ws) {
-  if (!ws.deviceId) return;
-
   clients.delete(ws);
   if (ws.incomingTransfers) ws.incomingTransfers.clear();
   if (ws.incomingBundles) ws.incomingBundles.clear();
+  if (!ws.deviceId) return;
 
   const userConnections = activeUsers.get(ws.deviceId);
   if (userConnections) {
@@ -452,6 +547,8 @@ function handleClientClose(ws) {
       });
     }
   }
+
+  broadcastPeopleList();
 }
 
 server.listen(PORT, "0.0.0.0", () => {

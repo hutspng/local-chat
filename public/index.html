@@ -17,12 +17,18 @@
     </header>
 
     <div class="main">
+      <aside class="peoplePane">
+        <div class="box peopleBox">
+          <div class="label">Pessoas online</div>
+          <div class="small" id="peopleSummary">Carregando lista...</div>
+          <div class="peopleList" id="peopleList" aria-live="polite"></div>
+        </div>
+      </aside>
+
       <section class="chat">
         <div class="log" id="log"></div>
         <div class="form">
           <textarea id="msg" placeholder="Digite sua mensagem..." maxlength="10000" rows="3" disabled></textarea>
-          <button id="pickImage" type="button" disabled>Mídia</button>
-          <input id="imageInput" type="file" accept="image/*,video/*" multiple hidden />
           <button id="pickFile" type="button" disabled>Arquivo</button>
           <input id="fileInput" type="file" multiple hidden />
           <button id="send" disabled>Enviar</button>
