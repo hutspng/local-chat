@@ -1,11 +1,3 @@
-    :root{
-      --bg:#0b1220; --panel:#111a2e; --text:#e7eefc; --muted:#9bb0d1;
-      --border:rgba(255,255,255,.10); --accent:#6aa6ff;
-    }
-    *{ box-sizing:border-box; }
-    body{
-      margin:0; background:radial-gradient(900px 600px at 20% 0%, #16264a 0%, var(--bg) 60%);
-      color:var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      @import url("./styles/base.css");
-      @import url("./styles/sidebars.css");
-      @import url("./styles/overlays.css");
+@import url("./styles/base.css");
+@import url("./styles/sidebars.css");
+@import url("./styles/overlays.css");
