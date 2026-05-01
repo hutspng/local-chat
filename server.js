@@ -10,6 +10,7 @@ const path = require("path");
 const http = require("http");
 const express = require("express");
 const WebSocket = require("ws");
+const { Transform } = require("stream");
 
 const PORT = process.env.PORT || 3000;
 const CHAT_HOSTNAME = String(process.env.CHAT_HOSTNAME || "local-chat.lan").trim() || "local-chat.lan";
@@ -62,7 +63,6 @@ app.get("/media/:mediaId", (req, res) => {
   console.log(`[MEDIA] Servindo ${mediaId}: ${cached.mimeType}, ${(cached.size / 1024 / 1024).toFixed(2)}MB`);
 
   try {
-    // Decodifica base64 para buffer
     const base64 = cached.base64;
     
     if (!base64 || base64.length === 0) {
@@ -70,56 +70,99 @@ app.get("/media/:mediaId", (req, res) => {
       return res.status(500).json({ error: "Mídia corrompida" });
     }
     
-    const buffer = Buffer.from(base64, "base64");
-    const fileSize = buffer.length;
+    // Calcular tamanho binário estimado (base64 é 4/3 do tamanho original)
+    const binarySize = Math.ceil(base64.length * 0.75);
 
-    console.log(`[MEDIA] Buffer criado: ${fileSize} bytes para ${mediaId}`);
+    console.log(`[MEDIA] Base64 size: ${base64.length}, binary size: ${binarySize}`);
 
-    // Suporte a Range requests para streaming
-    const range = req.headers.range;
     res.set("Accept-Ranges", "bytes");
     res.set("Content-Type", cached.mimeType || "application/octet-stream");
 
+    // Suporte a Range requests
+    const range = req.headers.range;
     if (range) {
       const parts = range.replace(/bytes=/, "").split("-");
       const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      const end = parts[1] ? parseInt(parts[1], 10) : binarySize - 1;
 
-      if (start >= fileSize || end >= fileSize || start > end) {
-        res.status(416).set("Content-Range", `bytes */${fileSize}`).end();
+      if (start >= binarySize || end >= binarySize || start > end) {
+        res.status(416).set("Content-Range", `bytes */${binarySize}`).end();
         return;
       }
 
-      const chunkSize = end - start + 1;
-      res.status(206);
-      res.set("Content-Range", `bytes ${start}-${end}/${fileSize}`);
-      res.set("Content-Length", chunkSize);
-      res.end(buffer.slice(start, end + 1));
+      // Para Range requests com base64, decodificar apenas a parte necessária
+      try {
+        // Calcular qual parte do base64 é necessária
+        // Cada caractere base64 representa 6 bits, 4 caracteres = 3 bytes
+        const startBase64Idx = Math.floor(start / 3) * 4;
+        const endBinary = Math.min(end + 1, binarySize);
+        const endBase64Idx = Math.ceil(endBinary / 3) * 4;
+        
+        const base64Chunk = base64.slice(startBase64Idx, endBase64Idx);
+        const buffer = Buffer.from(base64Chunk, "base64");
+        const actualStart = start % 3;
+        const slicedBuffer = buffer.slice(actualStart, actualStart + (end - start + 1));
+
+        res.status(206);
+        res.set("Content-Range", `bytes ${start}-${end}/${binarySize}`);
+        res.set("Content-Length", slicedBuffer.length);
+        res.end(slicedBuffer);
+      } catch (err) {
+        console.error(`[MEDIA] Erro ao processar Range request para ${mediaId}:`, err);
+        res.status(500).end();
+      }
     } else {
-      res.set("Content-Length", fileSize);
+      res.set("Content-Length", binarySize);
       res.set("Cache-Control", "public, max-age=3600");
       
-      // Para arquivos grandes, enviar em chunks para evitar timeout
-      const STREAM_CHUNK = 64 * 1024; // 64KB por chunk
-      let offset = 0;
+      // Decodificar e servir em chunks de 64KB para evitar memory spike
+      const STREAM_CHUNK = 64 * 1024; // 64KB chunks
+      let base64Idx = 0;
       
       const sendChunk = () => {
-        if (offset >= fileSize) {
+        if (base64Idx >= base64.length) {
           console.log(`[MEDIA] Finalizado streaming de ${mediaId}`);
           res.end();
           return;
         }
         
-        const size = Math.min(STREAM_CHUNK, fileSize - offset);
-        const chunk = buffer.slice(offset, offset + size);
-        offset += size;
+        // Processar múltiplos de 4 caracteres base64 (cada 4 = 3 bytes)
+        const base64End = Math.min(base64Idx + STREAM_CHUNK * 4 / 3, base64.length);
+        // Arredondar para múltiplo de 4
+        const roundedEnd = Math.floor(base64End / 4) * 4;
         
-        if (!res.write(chunk)) {
-          // Se o buffer interno está cheio, aguardar drain
-          res.once('drain', sendChunk);
-        } else {
-          // Enviar próximo chunk no próximo tick
-          setImmediate(sendChunk);
+        if (roundedEnd <= base64Idx) {
+          // Se não há múltiplo de 4 completo, pegar o resto
+          const chunk = Buffer.from(base64.slice(base64Idx), "base64");
+          if (chunk.length > 0) {
+            if (!res.write(chunk)) {
+              res.once('drain', () => {
+                base64Idx = base64.length;
+                setImmediate(sendChunk);
+              });
+            } else {
+              base64Idx = base64.length;
+              setImmediate(sendChunk);
+            }
+          } else {
+            setImmediate(sendChunk);
+          }
+          return;
+        }
+        
+        try {
+          const base64Chunk = base64.slice(base64Idx, roundedEnd);
+          const buffer = Buffer.from(base64Chunk, "base64");
+          base64Idx = roundedEnd;
+          
+          if (!res.write(buffer)) {
+            res.once('drain', sendChunk);
+          } else {
+            setImmediate(sendChunk);
+          }
+        } catch (err) {
+          console.error(`[MEDIA] Erro ao decodificar base64 para ${mediaId}:`, err);
+          res.end();
         }
       };
       
