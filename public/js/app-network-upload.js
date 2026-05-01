@@ -49,6 +49,11 @@
       });
     }
 
+    if (window.__chatAutoConnectPending) {
+      window.__chatAutoConnectPending = false;
+      connect();
+    }
+
     function send() {
       if (!myName) { showNameModal(); return; }
       if (!ws || ws.readyState !== WebSocket.OPEN) return;

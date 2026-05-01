@@ -494,8 +494,12 @@
         sendPresenceUpdate(true);
       }
 
-      // Só conecta depois do nome definido
-      if (!ws || ws.readyState === WebSocket.CLOSED) connect();
+      // Só conecta depois do nome definido, mas apenas quando o módulo de rede já carregou.
+      if (typeof connect === "function" && (!ws || ws.readyState === WebSocket.CLOSED)) {
+        connect();
+      } else {
+        window.__chatAutoConnectPending = true;
+      }
     }
 
     enterChat.addEventListener("click", confirmName);
@@ -508,6 +512,7 @@
     } else {
       namePick.value = myName;
       enableChatUI(true);
+      window.__chatAutoConnectPending = true;
     }
 
     // ===== Funções de menção =====

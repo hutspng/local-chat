@@ -17,6 +17,73 @@ const CHAT_HOSTNAME = String(process.env.CHAT_HOSTNAME || "local-chat.lan").trim
 const app = express();
 app.use(express.static(path.join(__dirname, "public")));
 
+// Cache para mídia (vídeos/imagens grandes), para evitar data URLs gigantes
+const mediaCache = new Map();
+let mediaCacheCounter = 0;
+const MEDIA_CACHE_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutos
+
+function storeMediaInCache(base64Data, mimeType, fileName) {
+  const mediaId = `media_${++mediaCacheCounter}`;
+  const timeoutId = setTimeout(() => {
+    mediaCache.delete(mediaId);
+  }, MEDIA_CACHE_TIMEOUT_MS);
+
+  mediaCache.set(mediaId, {
+    base64: base64Data,
+    mimeType,
+    fileName,
+    timeoutId
+  });
+
+  return mediaId;
+}
+
+// Rota para servir mídia com suporte a Range (streaming)
+app.get("/media/:mediaId", (req, res) => {
+  const { mediaId } = req.params;
+  const cached = mediaCache.get(mediaId);
+
+  if (!cached) {
+    return res.status(404).json({ error: "Mídia não encontrada" });
+  }
+
+  try {
+    // Decodifica base64 para buffer
+    const base64 = cached.base64;
+    const buffer = Buffer.from(base64, "base64");
+    const fileSize = buffer.length;
+
+    // Suporte a Range requests para streaming
+    const range = req.headers.range;
+    if (range) {
+      const parts = range.replace(/bytes=/, "").split("-");
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+
+      if (start >= fileSize || end >= fileSize || start > end) {
+        res.status(416).set("Content-Range", `bytes */${fileSize}`).end();
+        return;
+      }
+
+      res.status(206);
+      res.set("Content-Range", `bytes ${start}-${end}/${fileSize}`);
+      res.set("Accept-Ranges", "bytes");
+      res.set("Content-Length", end - start + 1);
+      res.set("Content-Type", cached.mimeType || "application/octet-stream");
+      res.end(buffer.slice(start, end + 1));
+    } else {
+      res.set("Content-Length", fileSize);
+      res.set("Content-Type", cached.mimeType || "application/octet-stream");
+      res.set("Accept-Ranges", "bytes");
+      res.set("Cache-Control", "public, max-age=3600");
+      res.end(buffer);
+    }
+  } catch (err) {
+    console.error("Erro ao servir mídia:", err);
+    res.status(500).json({ error: "Erro ao servir mídia" });
+  }
+});
+
 app.get("/chat-config", (req, res) => {
   res.json({
     port: Number(PORT),
@@ -429,32 +496,58 @@ function onMessage(raw) {
       const at = nowTime();
 
       if (transfer.kind === "image") {
-        publishChat({
-          type: "chat",
-          name: transfer.name,
-          text: "",
-          imageData: `data:${transfer.fileType};base64,${base64}`,
-          imageName: transfer.fileName,
-          videoData: "",
-          videoName: "",
-          fileData: "",
-          fileName: "",
-          fileType: "",
-          fileSize: 0,
-          bundleFiles: [],
-          at
-        });
+        // Para imagens, usar cache com rota HTTP se forem muito grandes (> 5MB)
+        // Caso contrário, manter como data URL para imagens pequenas
+        if (base64.length > 5_000_000) {
+          const mediaId = storeMediaInCache(base64, transfer.fileType, transfer.fileName);
+          const imageUrl = `/media/${mediaId}`;
+          publishChat({
+            type: "chat",
+            name: transfer.name,
+            text: "",
+            imageData: imageUrl, // URL HTTP para imagens grandes
+            imageName: transfer.fileName,
+            videoData: "",
+            videoName: "",
+            fileData: "",
+            fileName: "",
+            fileType: "",
+            fileSize: 0,
+            bundleFiles: [],
+            at
+          });
+        } else {
+          publishChat({
+            type: "chat",
+            name: transfer.name,
+            text: "",
+            imageData: `data:${transfer.fileType};base64,${base64}`, // data URL para imagens pequenas
+            imageName: transfer.fileName,
+            videoData: "",
+            videoName: "",
+            fileData: "",
+            fileName: "",
+            fileType: "",
+            fileSize: 0,
+            bundleFiles: [],
+            at
+          });
+        }
         return;
       }
 
       if (transfer.kind === "video") {
+        // Para vídeos, usar cache com rota HTTP em vez de data URL gigante
+        const mediaId = storeMediaInCache(base64, transfer.fileType, transfer.fileName);
+        const videoUrl = `/media/${mediaId}`;
+
         publishChat({
           type: "chat",
           name: transfer.name,
           text: "",
           imageData: "",
           imageName: "",
-          videoData: `data:${transfer.fileType};base64,${base64}`,
+          videoData: videoUrl, // URL HTTP ao invés de data URL
           videoName: transfer.fileName,
           fileData: "",
           fileName: "",

@@ -12,7 +12,7 @@
       background-position: center;
     }
     .card{
-      width:min(920px, 96vw);
+      width:min(1180px, 98vw);
       height:min(92vh, 760px);
       background:rgba(17,26,46,.92);
       border:1px solid var(--border);
@@ -34,7 +34,7 @@
     .statusDot.on{ background:#32d296; }
     .main{
       display:grid;
-      grid-template-columns: 240px 1fr 280px;
+      grid-template-columns: 220px minmax(0, 1.45fr) 240px;
       gap:0;
       min-height: 0;
       flex:1;
