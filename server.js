@@ -20,11 +20,19 @@ app.use(express.static(path.join(__dirname, "public")));
 // Cache para mídia (vídeos/imagens grandes), para evitar data URLs gigantes
 const mediaCache = new Map();
 let mediaCacheCounter = 0;
-const MEDIA_CACHE_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutos
+const MEDIA_CACHE_TIMEOUT_MS = 60 * 60 * 1000; // 60 minutos (aumentado)
 
 function storeMediaInCache(base64Data, mimeType, fileName) {
   const mediaId = `media_${++mediaCacheCounter}`;
+  
+  // Validar entrada
+  if (!base64Data || typeof base64Data !== 'string' || base64Data.length === 0) {
+    console.error(`[CACHE] Entrada inválida para cache: base64 vazia`);
+    return null;
+  }
+
   const timeoutId = setTimeout(() => {
+    console.log(`[CACHE] Limpando media ${mediaId} após timeout`);
     mediaCache.delete(mediaId);
   }, MEDIA_CACHE_TIMEOUT_MS);
 
@@ -32,9 +40,12 @@ function storeMediaInCache(base64Data, mimeType, fileName) {
     base64: base64Data,
     mimeType,
     fileName,
-    timeoutId
+    timeoutId,
+    storedAt: Date.now(),
+    size: base64Data.length
   });
 
+  console.log(`[CACHE] Armazenado ${mediaId}: ${mimeType}, ${(base64Data.length / 1024 / 1024).toFixed(2)}MB`);
   return mediaId;
 }
 
@@ -44,17 +55,31 @@ app.get("/media/:mediaId", (req, res) => {
   const cached = mediaCache.get(mediaId);
 
   if (!cached) {
+    console.error(`[MEDIA] ${mediaId} não encontrado no cache. IDs disponíveis:`, Array.from(mediaCache.keys()));
     return res.status(404).json({ error: "Mídia não encontrada" });
   }
+
+  console.log(`[MEDIA] Servindo ${mediaId}: ${cached.mimeType}, ${(cached.size / 1024 / 1024).toFixed(2)}MB`);
 
   try {
     // Decodifica base64 para buffer
     const base64 = cached.base64;
+    
+    if (!base64 || base64.length === 0) {
+      console.error(`[MEDIA] ${mediaId} tem base64 vazio`);
+      return res.status(500).json({ error: "Mídia corrompida" });
+    }
+    
     const buffer = Buffer.from(base64, "base64");
     const fileSize = buffer.length;
 
+    console.log(`[MEDIA] Buffer criado: ${fileSize} bytes para ${mediaId}`);
+
     // Suporte a Range requests para streaming
     const range = req.headers.range;
+    res.set("Accept-Ranges", "bytes");
+    res.set("Content-Type", cached.mimeType || "application/octet-stream");
+
     if (range) {
       const parts = range.replace(/bytes=/, "").split("-");
       const start = parseInt(parts[0], 10);
@@ -65,22 +90,48 @@ app.get("/media/:mediaId", (req, res) => {
         return;
       }
 
+      const chunkSize = end - start + 1;
       res.status(206);
       res.set("Content-Range", `bytes ${start}-${end}/${fileSize}`);
-      res.set("Accept-Ranges", "bytes");
-      res.set("Content-Length", end - start + 1);
-      res.set("Content-Type", cached.mimeType || "application/octet-stream");
+      res.set("Content-Length", chunkSize);
       res.end(buffer.slice(start, end + 1));
     } else {
       res.set("Content-Length", fileSize);
-      res.set("Content-Type", cached.mimeType || "application/octet-stream");
-      res.set("Accept-Ranges", "bytes");
       res.set("Cache-Control", "public, max-age=3600");
-      res.end(buffer);
+      
+      // Para arquivos grandes, enviar em chunks para evitar timeout
+      const STREAM_CHUNK = 64 * 1024; // 64KB por chunk
+      let offset = 0;
+      
+      const sendChunk = () => {
+        if (offset >= fileSize) {
+          console.log(`[MEDIA] Finalizado streaming de ${mediaId}`);
+          res.end();
+          return;
+        }
+        
+        const size = Math.min(STREAM_CHUNK, fileSize - offset);
+        const chunk = buffer.slice(offset, offset + size);
+        offset += size;
+        
+        if (!res.write(chunk)) {
+          // Se o buffer interno está cheio, aguardar drain
+          res.once('drain', sendChunk);
+        } else {
+          // Enviar próximo chunk no próximo tick
+          setImmediate(sendChunk);
+        }
+      };
+      
+      sendChunk();
     }
   } catch (err) {
-    console.error("Erro ao servir mídia:", err);
-    res.status(500).json({ error: "Erro ao servir mídia" });
+    console.error(`[MEDIA] Erro ao servir ${mediaId}:`, err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Erro ao servir mídia" });
+    } else {
+      res.end();
+    }
   }
 });
 
@@ -483,15 +534,35 @@ function onMessage(raw) {
     if (data.type === "file-end") {
       const transferId = String(data.transferId || "").slice(0, 64);
       const transfer = ws.incomingTransfers.get(transferId);
-      if (!transfer) return;
+      if (!transfer) {
+        console.log(`[FILE-END] Transfer ${transferId} não encontrado`);
+        return;
+      }
+      
       ws.incomingTransfers.delete(transferId);
 
-      if (Date.now() - transfer.startedAt > TRANSFER_TIMEOUT_MS) return;
-      if (transfer.received !== transfer.totalChunks) return;
-      if (transfer.chunks.some((chunk) => typeof chunk !== "string")) return;
+      console.log(`[FILE-END] Finalizando ${transferId}: tipo=${transfer.kind}, chunks=${transfer.received}/${transfer.totalChunks}`);
+
+      if (Date.now() - transfer.startedAt > TRANSFER_TIMEOUT_MS) {
+        console.log(`[FILE-END] ${transferId} expirado (timeout)`);
+        return;
+      }
+      if (transfer.received !== transfer.totalChunks) {
+        console.log(`[FILE-END] ${transferId} chunks incompletos: ${transfer.received}/${transfer.totalChunks}`);
+        return;
+      }
+      if (transfer.chunks.some((chunk) => typeof chunk !== "string")) {
+        console.log(`[FILE-END] ${transferId} contém chunks inválidos`);
+        return;
+      }
 
       const base64 = transfer.chunks.join("");
-      if (!base64 || base64.length > transfer.maxBase64Chars) return;
+      console.log(`[FILE-END] ${transferId} base64 size: ${base64.length} bytes, max permitido: ${transfer.maxBase64Chars}`);
+      
+      if (!base64 || base64.length > transfer.maxBase64Chars) {
+        console.log(`[FILE-END] ${transferId} base64 inválido ou muito grande`);
+        return;
+      }
 
       const at = nowTime();
 
@@ -538,8 +609,16 @@ function onMessage(raw) {
 
       if (transfer.kind === "video") {
         // Para vídeos, usar cache com rota HTTP em vez de data URL gigante
+        console.log(`[VIDEO-END] Recebido vídeo: ${transfer.fileName}, ${(base64.length / 1024 / 1024).toFixed(2)}MB`);
         const mediaId = storeMediaInCache(base64, transfer.fileType, transfer.fileName);
+        
+        if (!mediaId) {
+          console.error(`[VIDEO-END] Falha ao armazenar vídeo em cache`);
+          return;
+        }
+        
         const videoUrl = `/media/${mediaId}`;
+        console.log(`[VIDEO-END] Publicando chat com videoUrl: ${videoUrl}`);
 
         publishChat({
           type: "chat",
