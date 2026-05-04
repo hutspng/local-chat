@@ -23,8 +23,9 @@
     const enterChat = document.getElementById("enterChat");
     const peopleState = new Map();
 
-    // Mantem a dica no formato antigo para facilitar acesso por IP na rede local.
-    linkHint.textContent = "http://IP:3000";
+    // Detecta o endereço real do servidor que o cliente está usando
+    const serverURL = `http://${window.location.hostname}:${window.location.port || 3000}`;
+    linkHint.textContent = serverURL;
 
     function sanitizeName(s) {
       return (s || "")
@@ -462,7 +463,14 @@
     }
 
     // ===== Nome obrigatório antes de conectar =====
-    let myName = sanitizeName(localStorage.getItem("chat_name"));
+    let myName = null;
+    const savedName = localStorage.getItem("chat_name");
+    if (savedName) {
+      const validated = sanitizeName(savedName);
+      if (validated && validated !== "Anônimo") {
+        myName = validated;
+      }
+    }
 
     function showNameModal() {
       nameOverlay.classList.add("show");
@@ -477,7 +485,7 @@
 
     function confirmName() {
       const picked = sanitizeName(namePick.value);
-      if (!picked) {
+      if (!picked || picked === "Anônimo") {
         addLine("[sistema] escolha um nome para entrar.", "system");
         namePick.focus();
         return;
