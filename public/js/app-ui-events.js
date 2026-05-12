@@ -12,11 +12,6 @@
     let currentViewerSrc = "";
     let currentViewerName = "imagem";
 
-    // ===== Rastreamento de menções =====
-    const allMessages = []; // { messageId, name, at, div }
-    const messageById = new Map();
-    const messagesByAuthor = {}; // { name -> [ messageIds ] }
-
     function updateImageTransform() {
       const totalScale = viewerBaseScale * viewerZoom;
       const translate = `translate(${currentPanX}px, ${currentPanY}px)`;
@@ -164,6 +159,52 @@
           return;
         }
       }
+    });
+
+    let msgDragDepth = 0;
+
+    function hasDroppedFiles(dataTransfer) {
+      if (!dataTransfer) return false;
+      if (dataTransfer.files && dataTransfer.files.length > 0) return true;
+      const types = Array.from(dataTransfer.types || []);
+      return types.includes("Files");
+    }
+
+    function clearMsgDropState() {
+      msgDragDepth = 0;
+      msgEl.classList.remove("dragOver");
+    }
+
+    msgEl.addEventListener("dragenter", (e) => {
+      if (!hasDroppedFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      msgDragDepth += 1;
+      msgEl.classList.add("dragOver");
+    });
+
+    msgEl.addEventListener("dragover", (e) => {
+      if (!hasDroppedFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      msgEl.classList.add("dragOver");
+    });
+
+    msgEl.addEventListener("dragleave", (e) => {
+      if (!hasDroppedFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      msgDragDepth = Math.max(0, msgDragDepth - 1);
+      if (msgDragDepth === 0) {
+        msgEl.classList.remove("dragOver");
+      }
+    });
+
+    msgEl.addEventListener("drop", (e) => {
+      if (!hasDroppedFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
+      clearMsgDropState();
+      if (!files.length) return;
+      sendFileBundle(files);
     });
 
     viewerClose.addEventListener("click", closeImageViewer);
