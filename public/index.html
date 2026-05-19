@@ -58,6 +58,13 @@
           <div class="systemLog" id="systemLog" aria-live="polite"></div>
         </div>
       </aside>
+
+      <!-- Tab bar para mobile -->
+      <div class="tabBar" id="tabBar">
+        <button class="tabButton active" data-tab="chat" id="chatTab">Chat</button>
+        <button class="tabButton" data-tab="people" id="peopleTab">Pessoas</button>
+        <button class="tabButton" data-tab="info" id="infoTab">Info</button>
+      </div>
     </div>
 
     <!-- Modal para definir nome (obrigatório antes de usar o chat) -->
@@ -88,5 +95,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
     <script src="script.js"></script>
+    <script src="js/app-mobile-tabs.js"></script>
 </body>
 </html>
