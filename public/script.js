@@ -1,8 +1,8 @@
 (function loadAppModules() {
   const modules = [
-    "js/app-core.js",
-    "js/app-network-upload.js",
-    "js/app-ui-events.js"
+    "js/app-core.js",             // Define sendBtn, msgEl, allMessages, etc
+    "js/app-ui-events.js",        // Usa sendBtn, msgEl
+    "js/app-network-upload.js"    // Chama resetMessageTracking, send
   ];
 
   function loadSequentially(index) {

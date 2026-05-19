@@ -5,16 +5,23 @@
       ws = new WebSocket(wsUrl);
       historyApplied = false;
 
-      ws.addEventListener("open", () => {
-        setStatus(true, "online");
-        addLine("[sistema] conectado", "system");
-        // Envia deviceId e presença inicial para registrar usuário.
+      function sendIdentity() {
+        if (!ws || ws.readyState !== WebSocket.OPEN || !myName) return;
         ws.send(JSON.stringify({
           type: "set-device-id",
           deviceId,
           name: myName,
           tabActive: isTabActiveNow()
         }));
+      }
+
+      window.__chatSendIdentity = sendIdentity;
+
+      ws.addEventListener("open", () => {
+        setStatus(true, "online");
+        addLine("[sistema] conectado", "system");
+        // Envia deviceId e presença inicial para registrar usuário.
+        sendIdentity();
       });
 
       ws.addEventListener("close", () => {
@@ -45,6 +52,11 @@
           renderPeopleList(Array.isArray(data.people) ? data.people : []);
         } else if (data.type === "poke") {
           notifyPoke(data.fromName);
+        } else if (data.type === "name-error") {
+          const msg = String(data.text || "Nome já está em uso. Escolha outro.");
+          addSystemLine(`[${data.at || "--:--:--"}] [sistema] ${msg}`);
+          setStatus(false, "nome em conflito");
+          showNameModal();
         }
       });
     }

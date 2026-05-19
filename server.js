@@ -16,12 +16,25 @@ const PORT = process.env.PORT || 3000;
 const CHAT_HOSTNAME = String(process.env.CHAT_HOSTNAME || "local-chat.lan").trim() || "local-chat.lan";
 
 const app = express();
+
+// CORS middleware - permite conexões da rede local
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 app.use(express.static(path.join(__dirname, "public")));
 
 // Cache para mídia (vídeos/imagens grandes), para evitar data URLs gigantes
 const mediaCache = new Map();
 let mediaCacheCounter = 0;
 const MEDIA_CACHE_TIMEOUT_MS = 60 * 60 * 1000; // 60 minutos (aumentado)
+const LARGE_FILE_CACHE_THRESHOLD_BASE64 = 5_000_000;
 
 function storeMediaInCache(base64Data, mimeType, fileName) {
   const mediaId = `media_${++mediaCacheCounter}`;
@@ -77,6 +90,10 @@ app.get("/media/:mediaId", (req, res) => {
 
     res.set("Accept-Ranges", "bytes");
     res.set("Content-Type", cached.mimeType || "application/octet-stream");
+    const safeFileName = String(cached.fileName || "arquivo").replace(/[\r\n"]/g, "_");
+    const inlineMime = /^(image|video|audio)\//.test(String(cached.mimeType || "").toLowerCase());
+    const disposition = inlineMime ? "inline" : "attachment";
+    res.set("Content-Disposition", `${disposition}; filename*=UTF-8''${encodeURIComponent(safeFileName)}`);
 
     // Suporte a Range requests
     const range = req.headers.range;
@@ -93,15 +110,20 @@ app.get("/media/:mediaId", (req, res) => {
       // Para Range requests com base64, decodificar apenas a parte necessária
       try {
         // Calcular qual parte do base64 é necessária
-        // Cada caractere base64 representa 6 bits, 4 caracteres = 3 bytes
+        // Cada 4 caracteres base64 = 3 bytes. Então:
+        // Para obter bytes [start, end], precisamos decodificar base64 starting from Math.floor(start/3)*4
         const startBase64Idx = Math.floor(start / 3) * 4;
         const endBinary = Math.min(end + 1, binarySize);
         const endBase64Idx = Math.ceil(endBinary / 3) * 4;
         
+        // Decodificar apenas o necessário
         const base64Chunk = base64.slice(startBase64Idx, endBase64Idx);
-        const buffer = Buffer.from(base64Chunk, "base64");
-        const actualStart = start % 3;
-        const slicedBuffer = buffer.slice(actualStart, actualStart + (end - start + 1));
+        const decodedBuffer = Buffer.from(base64Chunk, "base64");
+        
+        // Calcular offset dentro do buffer decodificado
+        const offsetInBuffer = start - (startBase64Idx / 4) * 3;
+        const lengthNeeded = end - start + 1;
+        const slicedBuffer = decodedBuffer.slice(offsetInBuffer, offsetInBuffer + lengthNeeded);
 
         res.status(206);
         res.set("Content-Range", `bytes ${start}-${end}/${binarySize}`);
@@ -187,7 +209,15 @@ app.get("/chat-config", (req, res) => {
 });
 
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocket.Server({ 
+  server,
+  perMessageDeflate: false,
+  // Permitir conexões de qualquer origem (rede local)
+  verifyClient: (info) => {
+    // Aceita qualquer origem - útil para rede local
+    return true;
+  }
+});
 
 const clients = new Set();
 const activeUsers = new Map(); // deviceId -> Set of WebSocket connections
@@ -268,6 +298,38 @@ function buildPeopleList() {
   return people;
 }
 
+function normalizeNameKey(name) {
+  return String(name || "").trim().toLocaleLowerCase("pt-BR");
+}
+
+function isNameInUse(name, excludeDeviceId = null) {
+  const key = normalizeNameKey(name);
+  if (!key) return false;
+
+  for (const [deviceId, sockets] of activeUsers.entries()) {
+    if (excludeDeviceId && deviceId === excludeDeviceId) continue;
+
+    for (const socket of sockets) {
+      if (!socket || !socket.userName) continue;
+      if (normalizeNameKey(socket.userName) === key) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function sendNameError(ws, attemptedName) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({
+    type: "name-error",
+    attemptedName,
+    text: `O nome \"${attemptedName}\" já está em uso. Escolha outro.`,
+    at: nowTime()
+  }));
+}
+
 function broadcastPeopleList() {
   broadcast({
     type: "people-list",
@@ -299,6 +361,12 @@ wss.on("connection", (ws) => {
       const deviceId = String(data.deviceId).slice(0, 64);
       const userName = normalizeName(data.name);
       const tabActive = typeof data.tabActive === "boolean" ? data.tabActive : true;
+
+      if (isNameInUse(userName, deviceId)) {
+        sendNameError(ws, userName);
+        return;
+      }
+
       ws.deviceId = deviceId;
       ws.userName = userName;
       ws.tabActive = tabActive;
@@ -431,6 +499,12 @@ function onMessage(raw) {
     if (data.type === "presence-update") {
       const nextName = normalizeName(data.name || ws.userName);
       const nextTabActive = typeof data.tabActive === "boolean" ? data.tabActive : ws.tabActive;
+
+      if (nextName !== ws.userName && isNameInUse(nextName, ws.deviceId)) {
+        sendNameError(ws, nextName);
+        return;
+      }
+
       const changed = nextName !== ws.userName || nextTabActive !== ws.tabActive;
 
       ws.userName = nextName;
@@ -690,8 +764,18 @@ function onMessage(raw) {
           return;
         }
 
+        // Para arquivos grandes em pacote, enviar URL HTTP para evitar mensagem gigante no WebSocket.
+        const bundleFileData = base64.length > LARGE_FILE_CACHE_THRESHOLD_BASE64
+          ? `/media/${storeMediaInCache(base64, transfer.fileType, transfer.fileName)}`
+          : `data:${transfer.fileType};base64,${base64}`;
+
+        if (!bundleFileData || bundleFileData === "/media/null") {
+          console.error(`[FILE-END] Falha ao armazenar item de pacote em cache: ${transfer.fileName}`);
+          return;
+        }
+
         bundle.items[transfer.bundleIndex] = {
-          fileData: `data:${transfer.fileType};base64,${base64}`,
+          fileData: bundleFileData,
           fileName: transfer.fileName,
           fileType: transfer.fileType,
           fileSize: transfer.fileSize
@@ -719,6 +803,18 @@ function onMessage(raw) {
         return;
       }
 
+      // Arquivos grandes (APK, ZIP, etc.) devem ser distribuídos por URL HTTP, não como data URL gigante.
+      let outgoingFileData = `data:${transfer.fileType};base64,${base64}`;
+      if (base64.length > LARGE_FILE_CACHE_THRESHOLD_BASE64) {
+        const mediaId = storeMediaInCache(base64, transfer.fileType, transfer.fileName);
+        if (!mediaId) {
+          console.error(`[FILE-END] Falha ao armazenar arquivo em cache: ${transfer.fileName}`);
+          return;
+        }
+        outgoingFileData = `/media/${mediaId}`;
+        console.log(`[FILE-END] Publicando arquivo grande via URL HTTP: ${outgoingFileData}`);
+      }
+
       publishChat({
         type: "chat",
         name: transfer.name,
@@ -727,7 +823,7 @@ function onMessage(raw) {
         imageName: "",
         videoData: "",
         videoName: "",
-        fileData: `data:${transfer.fileType};base64,${base64}`,
+        fileData: outgoingFileData,
         fileName: transfer.fileName,
         fileType: transfer.fileType,
         fileSize: transfer.fileSize,

@@ -23,6 +23,11 @@
     const enterChat = document.getElementById("enterChat");
     const peopleState = new Map();
 
+    // ===== Rastreamento de menções =====
+    const allMessages = []; // { messageId, name, at, div }
+    const messageById = new Map();
+    const messagesByAuthor = {}; // { name -> [ messageIds ] }
+
     // Detecta o endereço real do servidor que o cliente está usando
     const serverURL = `http://${window.location.hostname}:${window.location.port || 3000}`;
     linkHint.textContent = serverURL;
@@ -357,7 +362,7 @@
         video.className = "chatVideo";
         video.src = resolvedVideoData;
         video.controls = true;
-        video.preload = "metadata";
+        video.preload = "none";
         div.appendChild(video);
 
         if (resolvedVideoName) {
@@ -499,7 +504,11 @@
       enableChatUI(true);
 
       if (ws && ws.readyState === WebSocket.OPEN) {
-        sendPresenceUpdate(true);
+        if (typeof window.__chatSendIdentity === "function") {
+          window.__chatSendIdentity();
+        } else {
+          sendPresenceUpdate(true);
+        }
       }
 
       // Só conecta depois do nome definido, mas apenas quando o módulo de rede já carregou.
