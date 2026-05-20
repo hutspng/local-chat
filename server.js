@@ -221,6 +221,8 @@ const wss = new WebSocket.Server({
 
 const clients = new Set();
 const activeUsers = new Map(); // deviceId -> Set of WebSocket connections
+// Mapeia nome normalizado -> deviceId (ajuda garantir nomes únicos por dispositivo)
+const nameToDevice = new Map();
 const chatHistory = [];
 const MAX_HISTORY = 200;
 let messageIdCounter = 0;
@@ -362,7 +364,9 @@ wss.on("connection", (ws) => {
       const userName = normalizeName(data.name);
       const tabActive = typeof data.tabActive === "boolean" ? data.tabActive : true;
 
-      if (isNameInUse(userName, deviceId)) {
+      // Verifica se outro dispositivo já registrou este nome
+      const nameKey = normalizeNameKey(userName);
+      if (nameKey && nameToDevice.has(nameKey) && nameToDevice.get(nameKey) !== deviceId) {
         sendNameError(ws, userName);
         return;
       }
@@ -400,6 +404,8 @@ wss.on("connection", (ws) => {
           at: nowTime()
         });
       }
+      // Registra o nome como pertencente a este deviceId
+      if (nameKey) nameToDevice.set(nameKey, deviceId);
 
       broadcastPeopleList();
     }
@@ -500,12 +506,24 @@ function onMessage(raw) {
       const nextName = normalizeName(data.name || ws.userName);
       const nextTabActive = typeof data.tabActive === "boolean" ? data.tabActive : ws.tabActive;
 
-      if (nextName !== ws.userName && isNameInUse(nextName, ws.deviceId)) {
+      const oldKey = normalizeNameKey(ws.userName);
+      const newKey = normalizeNameKey(nextName);
+
+      // Se houver mudança de nome, verificar se outro device já usou este nome
+      if (newKey && newKey !== oldKey && nameToDevice.has(newKey) && nameToDevice.get(newKey) !== ws.deviceId) {
         sendNameError(ws, nextName);
         return;
       }
 
       const changed = nextName !== ws.userName || nextTabActive !== ws.tabActive;
+
+      // Atualiza mapeamento de nome -> deviceId
+      if (newKey && newKey !== oldKey) {
+        nameToDevice.set(newKey, ws.deviceId);
+      }
+      if (oldKey && oldKey !== newKey && nameToDevice.get(oldKey) === ws.deviceId) {
+        nameToDevice.delete(oldKey);
+      }
 
       ws.userName = nextName;
       ws.tabActive = nextTabActive;
@@ -845,6 +863,11 @@ function handleClientClose(ws) {
     // Se não há mais conexões deste usuário, remove do mapa
     if (userConnections.size === 0) {
       activeUsers.delete(ws.deviceId);
+
+      // Remove qualquer nome associado a este deviceId
+      for (const [nameKey, dId] of nameToDevice.entries()) {
+        if (dId === ws.deviceId) nameToDevice.delete(nameKey);
+      }
 
       if (clients.size === 0) {
         chatHistory.length = 0;
