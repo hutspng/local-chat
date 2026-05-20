@@ -97,43 +97,76 @@ app.get("/media/:mediaId", (req, res) => {
 
     // Suporte a Range requests
     const range = req.headers.range;
-    if (range) {
-      const parts = range.replace(/bytes=/, "").split("-");
-      const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : binarySize - 1;
+      if (range) {
+        // Log básico para debug de problemas de streaming
+        console.log(`[MEDIA] Requisição /media/${mediaId} de ${req.ip} com Range: ${range}`);
 
-      if (start >= binarySize || end >= binarySize || start > end) {
-        res.status(416).set("Content-Range", `bytes */${binarySize}`).end();
-        return;
-      }
+        // Não suportamos ranges múltiplos (ex: bytes=0-1,2-3)
+        if (String(range).includes(",")) {
+          res.status(416).set("Content-Range", `bytes */${binarySize}`).end();
+          return;
+        }
 
-      // Para Range requests com base64, decodificar apenas a parte necessária
-      try {
-        // Calcular qual parte do base64 é necessária
-        // Cada 4 caracteres base64 = 3 bytes. Então:
-        // Para obter bytes [start, end], precisamos decodificar base64 starting from Math.floor(start/3)*4
-        const startBase64Idx = Math.floor(start / 3) * 4;
-        const endBinary = Math.min(end + 1, binarySize);
-        const endBase64Idx = Math.ceil(endBinary / 3) * 4;
-        
-        // Decodificar apenas o necessário
-        const base64Chunk = base64.slice(startBase64Idx, endBase64Idx);
-        const decodedBuffer = Buffer.from(base64Chunk, "base64");
-        
-        // Calcular offset dentro do buffer decodificado
-        const offsetInBuffer = start - (startBase64Idx / 4) * 3;
-        const lengthNeeded = end - start + 1;
-        const slicedBuffer = decodedBuffer.slice(offsetInBuffer, offsetInBuffer + lengthNeeded);
+        try {
+          const parts = range.replace(/bytes=/, "").split("-");
+          let start;
+          let end;
 
-        res.status(206);
-        res.set("Content-Range", `bytes ${start}-${end}/${binarySize}`);
-        res.set("Content-Length", slicedBuffer.length);
-        res.end(slicedBuffer);
-      } catch (err) {
-        console.error(`[MEDIA] Erro ao processar Range request para ${mediaId}:`, err);
-        res.status(500).end();
-      }
-    } else {
+          if (parts.length === 2) {
+            // Suffix range: bytes=-N  (últimos N bytes)
+            if (parts[0] === "") {
+              const suffix = parseInt(parts[1], 10);
+              if (Number.isNaN(suffix)) {
+                res.status(416).set("Content-Range", `bytes */${binarySize}`).end();
+                return;
+              }
+              start = Math.max(0, binarySize - suffix);
+              end = binarySize - 1;
+            } else {
+              start = parseInt(parts[0], 10);
+              end = parts[1] ? parseInt(parts[1], 10) : binarySize - 1;
+            }
+          } else {
+            res.status(416).set("Content-Range", `bytes */${binarySize}`).end();
+            return;
+          }
+
+          if (!Number.isInteger(start) || Number.isNaN(start) || !Number.isInteger(end) || Number.isNaN(end)) {
+            res.status(416).set("Content-Range", `bytes */${binarySize}`).end();
+            return;
+          }
+
+          // Clamp
+          if (start < 0) start = 0;
+          if (end >= binarySize) end = binarySize - 1;
+          if (start > end) {
+            res.status(416).set("Content-Range", `bytes */${binarySize}`).end();
+            return;
+          }
+
+          // Calcular qual parte do base64 é necessária (alinhado a múltiplos de 4)
+          const startBase64Idx = Math.floor(start / 3) * 4;
+          const endBinary = Math.min(end + 1, binarySize);
+          const endBase64Idx = Math.min(Math.ceil(endBinary / 3) * 4, base64.length);
+
+          const base64Chunk = base64.slice(startBase64Idx, endBase64Idx);
+          const decodedBuffer = Buffer.from(base64Chunk, "base64");
+
+          const offsetInBuffer = start - Math.floor(startBase64Idx / 4) * 3;
+          const lengthNeeded = end - start + 1;
+          const slicedBuffer = decodedBuffer.slice(offsetInBuffer, offsetInBuffer + lengthNeeded);
+
+          console.log(`[MEDIA] Servindo range ${start}-${end} (${slicedBuffer.length} bytes) para ${req.ip}`);
+
+          res.status(206);
+          res.set("Content-Range", `bytes ${start}-${end}/${binarySize}`);
+          res.set("Content-Length", slicedBuffer.length);
+          res.end(slicedBuffer);
+        } catch (err) {
+          console.error(`[MEDIA] Erro ao processar Range request para ${mediaId}:`, err);
+          res.status(500).end();
+        }
+      } else {
       res.set("Content-Length", binarySize);
       res.set("Cache-Control", "public, max-age=3600");
       
