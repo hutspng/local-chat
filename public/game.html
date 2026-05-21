@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Zombie Escape</title>
+  <link rel="stylesheet" href="game.css" />
+</head>
+<body>
+  <div class="gameShell">
+    <canvas id="gameCanvas"></canvas>
+
+    <div class="hud">
+      <div class="hudTop">
+        <div>
+          <div class="gameTitle">Zombie Escape</div>
+          <div class="gameSub" id="statusLine">conectando...</div>
+        </div>
+        <div class="hudStats">
+          <div class="statCard"><span>HP</span><strong id="hpValue">100</strong></div>
+          <div class="statCard"><span>Ammo</span><strong id="ammoValue">0</strong></div>
+          <div class="statCard"><span>Role</span><strong id="roleValue">humano</strong></div>
+        </div>
+      </div>
+
+      <div class="controlsHint">
+        WASD para mover, mouse para mirar, clique esquerdo para atirar, `E` para melee, `Shift` para correr.
+      </div>
+    </div>
+
+    <div class="overlay show" id="nameOverlay">
+      <div class="panel">
+        <h1>Entrar no jogo</h1>
+        <p>Use o mesmo nome do chat ou escolha outro. Os mortos viram zumbi e ficam em espectador da própria transformação.</p>
+        <div class="row">
+          <input id="nameInput" maxlength="24" placeholder="Seu nome" />
+          <button id="joinBtn">Entrar</button>
+        </div>
+        <div class="small" id="joinError"></div>
+      </div>
+    </div>
+
+    <div class="overlay" id="gameOverOverlay">
+      <div class="panel center">
+        <h1>Todos perderam</h1>
+        <p>Não sobrou nenhum humano vivo.</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/game-client.js"></script>
+</body>
+</html>

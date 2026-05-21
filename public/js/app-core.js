@@ -37,6 +37,27 @@
     const serverURL = `http://${window.location.hostname}:${window.location.port || 3000}`;
     linkHint.textContent = serverURL;
 
+    let gameHintClicks = 0;
+    let gameHintResetTimer = 0;
+
+    if (linkHint) {
+      linkHint.style.cursor = "pointer";
+      linkHint.title = "Clique 5 vezes para abrir o jogo";
+      linkHint.addEventListener("click", () => {
+        gameHintClicks += 1;
+        window.clearTimeout(gameHintResetTimer);
+        gameHintResetTimer = window.setTimeout(() => {
+          gameHintClicks = 0;
+        }, 1800);
+
+        if (gameHintClicks < 5) return;
+
+        gameHintClicks = 0;
+        const targetName = encodeURIComponent(myName || localStorage.getItem("chat_name") || "Anônimo");
+        window.location.href = `/game.html?name=${targetName}`;
+      });
+    }
+
     function sanitizeName(s) {
       return (s || "")
         .trim()
