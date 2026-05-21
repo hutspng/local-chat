@@ -23,6 +23,9 @@
     const enterChat = document.getElementById("enterChat");
     const peopleContextMenu = document.getElementById("peopleContextMenu");
     const blockNameAction = document.getElementById("blockNameAction");
+    const messageContextMenu = document.getElementById("messageContextMenu");
+    const deleteMessageAction = document.getElementById("deleteMessageAction");
+    const mentionMessageAction = document.getElementById("mentionMessageAction");
     const peopleState = new Map();
 
     // ===== Rastreamento de menções =====
@@ -215,12 +218,8 @@
     }
 
     function appendTextWithLinks(container, text) {
-      // Regex para URLs e mentões
-      const urlRegex = /(https?:\/\/[^\s]+)/gi;
-      const mentionRegex = /(@[a-záéíóúãõâêôĉäëïöüñ\w-]+(?:\/\d+)?)/gi;
-      
-      // Combinar ambos em um único regex
-      const combined = /(?:(https?:\/\/[^\s]+)|(@[a-záéíóúãõâêôĉäëïöüñ\w-]+(?:\/\d+)?))/gi;
+      // Regex para URLs e menções no formato @[nickname]/[messageId]
+      const combined = /(?:(https?:\/\/[^\s]+)|(@\[[^\]\s/]+\]\/\[[^\]\s/]+\]|@[a-záéíóúãõâêôĉäëïöüñ\w-]+(?:\/\d+)?))/gi;
       let lastIndex = 0;
 
       for (const match of text.matchAll(combined)) {
@@ -259,8 +258,8 @@
           }
         } else if (mention) {
           // Processa menção
-          const mentionId = parseMention(mention);
-          if (mentionId) {
+          const mentionTarget = parseMention(mention);
+          if (mentionTarget) {
             const a = document.createElement("a");
             a.className = "chatMention";
             a.href = "#";
@@ -271,7 +270,7 @@
             });
             a.addEventListener("click", (e) => {
               e.preventDefault();
-              scrollToMessageAndBlink(mentionId);
+              scrollToMessageAndBlink(mentionTarget.messageId);
             });
             container.appendChild(a);
           } else {
@@ -481,6 +480,7 @@
     let myName = null;
     let canBlockNames = false;
     let currentContextPerson = null;
+    let currentContextMessage = null;
     const savedName = localStorage.getItem("chat_name");
     if (savedName) {
       const validated = sanitizeName(savedName);
@@ -507,6 +507,13 @@
       currentContextPerson = null;
     }
 
+    function hideMessageContextMenu() {
+      if (!messageContextMenu) return;
+      messageContextMenu.classList.remove("show");
+      messageContextMenu.setAttribute("aria-hidden", "true");
+      currentContextMessage = null;
+    }
+
     function setCanBlockNames(enabled) {
       canBlockNames = !!enabled;
       if (!canBlockNames) hidePeopleContextMenu();
@@ -528,6 +535,22 @@
       peopleContextMenu.style.top = `${top}px`;
     }
 
+    function showMessageContextMenu(message, clientX, clientY) {
+      if (!messageContextMenu || !message || !message.messageId) return;
+
+      currentContextMessage = message;
+      messageContextMenu.classList.add("show");
+      messageContextMenu.setAttribute("aria-hidden", "false");
+
+      const menuWidth = 240;
+      const menuHeight = 92;
+      const left = Math.max(8, Math.min(clientX, window.innerWidth - menuWidth - 8));
+      const top = Math.max(8, Math.min(clientY, window.innerHeight - menuHeight - 8));
+
+      messageContextMenu.style.left = `${left}px`;
+      messageContextMenu.style.top = `${top}px`;
+    }
+
     function blockCurrentContextName() {
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
       if (!canBlockNames || !currentContextPerson) return;
@@ -541,6 +564,35 @@
 
       addSystemLine(`[sistema] solicitação de bloqueio enviada para ${currentContextPerson.name}.`);
       hidePeopleContextMenu();
+    }
+
+    function insertMentionForMessage(message) {
+      if (!message || !message.messageId || !message.name) return;
+      const current = msgEl.value;
+      const mentionText = `@[${message.name}]/[${message.messageId}]`;
+      msgEl.value = `${current}${current ? " " : ""}${mentionText}`;
+      msgEl.focus();
+      msgEl.selectionStart = msgEl.value.length;
+      msgEl.selectionEnd = msgEl.value.length;
+    }
+
+    function deleteCurrentContextMessage() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      if (!currentContextMessage || !currentContextMessage.messageId) return;
+
+      ws.send(JSON.stringify({
+        type: "delete-message",
+        messageId: currentContextMessage.messageId
+      }));
+
+      addSystemLine(`[sistema] solicitação de exclusão enviada para a mensagem ${currentContextMessage.messageId}.`);
+      hideMessageContextMenu();
+    }
+
+    function mentionCurrentContextMessage() {
+      if (!currentContextMessage) return;
+      insertMentionForMessage(currentContextMessage);
+      hideMessageContextMenu();
     }
 
     function confirmName() {
@@ -595,23 +647,40 @@
       return matchedKey ? messagesByAuthor[matchedKey] : null;
     }
 
+    function getLatestMessageIdByAuthor(authorName) {
+      const messages = getAuthorMessageIds(authorName);
+      if (!messages || !messages.length) return null;
+      return messages[messages.length - 1];
+    }
+
     function parseMention(mentionStr) {
-      // Parse @nome/número ou @nome
-      const match = mentionStr.match(/^@([a-záéíóúãõâêôĉäëïöüñ\w-]+)(?:\/(\d+))?$/i);
-      if (!match) return null;
-      const name = match[1];
-      const backCount = Number.isInteger(Number(match[2])) ? Number(match[2]) : 0;
+      const mention = String(mentionStr || "").trim();
+
+      // Novo formato: @[nickname]/[messageId]
+      const newFormat = mention.match(/^@\[([^\]]+)\]\/\[([^\]]+)\]$/i);
+      if (newFormat) {
+        const name = newFormat[1];
+        const messageId = newFormat[2];
+        const target = messageById.get(messageId);
+        if (!target) return null;
+        if (String(target.name || "").toLowerCase() !== String(name || "").toLowerCase()) return null;
+        return target;
+      }
+
+      // Fallback para mensagens antigas: @nome/índice
+      const legacyFormat = mention.match(/^@([a-záéíóúãõâêôĉäëïöüñ\w-]+)(?:\/(\d+))?$/i);
+      if (!legacyFormat) return null;
+      const name = legacyFormat[1];
+      const backCount = Number.isInteger(Number(legacyFormat[2])) ? Number(legacyFormat[2]) : 0;
       const messages = getAuthorMessageIds(name);
       if (!messages || !messages.length) return null;
       const idx = messages.length - 1 - backCount;
       if (idx < 0 || idx >= messages.length) return null;
-      return messages[idx];
+      return messageById.get(messages[idx]) || null;
     }
 
     function getMentionTooltipText(mentionStr) {
-      const targetMessageId = parseMention(mentionStr);
-      if (!targetMessageId) return "Referência não encontrada";
-      const target = messageById.get(targetMessageId);
+      const target = parseMention(mentionStr);
       if (!target) return "Referência não encontrada";
       return `${target.name} às ${target.at}`;
     }
@@ -631,9 +700,14 @@
         autocompleteDiv.style.display = "none";
         return;
       }
-      autocompleteDiv.innerHTML = authors.map(name => 
-        `<div class="mention-option" data-name="${name}">${name}</div>`
-      ).join("");
+      autocompleteDiv.innerHTML = authors
+        .map((name) => {
+          const messageId = getLatestMessageIdByAuthor(name);
+          if (!messageId) return "";
+          return `<div class="mention-option" data-name="${name}" data-message-id="${messageId}">${name} / ${messageId}</div>`;
+        })
+        .filter(Boolean)
+        .join("");
       autocompleteDiv.style.display = "block";
     }
 
@@ -644,26 +718,27 @@
       msgEl.parentElement.appendChild(div);
       div.addEventListener("click", (e) => {
         if (e.target.dataset.name) {
-          insertMention(e.target.dataset.name);
+          insertMention(e.target.dataset.name, e.target.dataset.messageId || "");
         }
       });
       return div;
     }
 
-    function insertMention(name) {
+    function insertMention(name, messageId = "") {
       const before = msgEl.value.lastIndexOf("@");
       if (before === -1) return;
-      msgEl.value = msgEl.value.substring(0, before) + `@${name}/0 `;
+      const targetMessageId = messageId || getLatestMessageIdByAuthor(name);
+      if (!targetMessageId) return;
+      msgEl.value = msgEl.value.substring(0, before) + `@[${name}]/[${targetMessageId}] `;
       msgEl.focus();
       document.getElementById("mentionAutocomplete").style.display = "none";
     }
 
     function handleMessageContext(messageId, name) {
+      const message = messageById.get(messageId);
+      if (!message) return;
       const currentText = msgEl.value;
-      const messages = getAuthorMessageIds(name) || [];
-      const pos = messages.lastIndexOf(messageId);
-      const backCount = pos >= 0 ? (messages.length - 1 - pos) : 0;
-      msgEl.value = currentText + (currentText ? " " : "") + `@${name}/${backCount}`;
+      msgEl.value = currentText + (currentText ? " " : "") + `@[${message.name}]/[${message.messageId}]`;
       msgEl.focus();
     }
 

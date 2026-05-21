@@ -121,7 +121,7 @@
       }
     });
 
-    // Context menu para mencionar
+    // Context menu da mensagem
     log.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       const msgLine = e.target.closest(".msgLine");
@@ -129,8 +129,20 @@
       const messageId = msgLine.dataset.messageId;
       const msg = messageById.get(messageId);
       if (!msg) return;
-      handleMessageContext(messageId, msg.name);
+      showMessageContextMenu(msg, e.clientX, e.clientY);
     });
+
+    if (deleteMessageAction) {
+      deleteMessageAction.addEventListener("click", () => {
+        deleteCurrentContextMessage();
+      });
+    }
+
+    if (mentionMessageAction) {
+      mentionMessageAction.addEventListener("click", () => {
+        mentionCurrentContextMessage();
+      });
+    }
 
     pickFileBtn.addEventListener("click", () => {
       if (!myName) {
@@ -281,13 +293,19 @@
     });
 
     document.addEventListener("click", (e) => {
-      if (!peopleContextMenu || !peopleContextMenu.classList.contains("show")) return;
-      if (e.target.closest("#peopleContextMenu")) return;
-      hidePeopleContextMenu();
+      if (peopleContextMenu && peopleContextMenu.classList.contains("show") && !e.target.closest("#peopleContextMenu")) {
+        hidePeopleContextMenu();
+      }
+      if (messageContextMenu && messageContextMenu.classList.contains("show") && !e.target.closest("#messageContextMenu")) {
+        hideMessageContextMenu();
+      }
     });
 
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") hidePeopleContextMenu();
+      if (e.key === "Escape") {
+        hidePeopleContextMenu();
+        hideMessageContextMenu();
+      }
     });
 
     window.addEventListener("focus", () => {
@@ -296,8 +314,10 @@
 
     window.addEventListener("blur", () => {
       hidePeopleContextMenu();
+      hideMessageContextMenu();
       sendPresenceUpdate();
     });
 
     window.addEventListener("resize", hidePeopleContextMenu);
+    window.addEventListener("resize", hideMessageContextMenu);
 

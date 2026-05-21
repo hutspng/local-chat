@@ -315,6 +315,71 @@ function publishChat(entry) {
   pushChatHistory(entry);
 }
 
+function parseMentionedMessageIds(text) {
+  const mentionedIds = new Set();
+  const source = String(text || "");
+  const regex = /@([^\s/]+)\/([^\s\]]+)/g;
+
+  for (const match of source.matchAll(regex)) {
+    const messageId = String(match[2] || "").slice(0, 64);
+    if (messageId) mentionedIds.add(messageId);
+  }
+
+  return mentionedIds;
+}
+
+function removeMessageCascade(targetMessageId) {
+  const targetId = String(targetMessageId || "").slice(0, 64);
+  if (!targetId) return [];
+
+  const entriesById = new Map();
+  const referencesById = new Map();
+
+  for (const entry of chatHistory) {
+    if (!entry || !entry.messageId) continue;
+    entriesById.set(entry.messageId, entry);
+    referencesById.set(entry.messageId, parseMentionedMessageIds(entry.text));
+  }
+
+  if (!entriesById.has(targetId)) return [];
+
+  const doomed = new Set([targetId]);
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+    for (const [messageId, refs] of referencesById.entries()) {
+      if (doomed.has(messageId)) continue;
+      for (const ref of refs) {
+        if (doomed.has(ref)) {
+          doomed.add(messageId);
+          changed = true;
+          break;
+        }
+      }
+    }
+  }
+
+  if (!doomed.size) return [];
+
+  for (let i = chatHistory.length - 1; i >= 0; i -= 1) {
+    const entry = chatHistory[i];
+    if (entry && doomed.has(entry.messageId)) {
+      chatHistory.splice(i, 1);
+    }
+  }
+
+  return Array.from(doomed);
+}
+
+function broadcastHistoryRefresh() {
+  broadcast({
+    type: "history-refresh",
+    messages: chatHistory,
+    at: nowTime()
+  });
+}
+
 function buildPeopleList() {
   const people = [];
   for (const [deviceId, sockets] of activeUsers.entries()) {
@@ -647,6 +712,22 @@ function onMessage(raw) {
         at: nowTime()
       });
       broadcastPeopleList();
+      return;
+    }
+
+    if (data.type === "delete-message") {
+      const targetMessageId = String(data.messageId || data.targetMessageId || "").slice(0, 64);
+      if (!targetMessageId) return;
+
+      const removedIds = removeMessageCascade(targetMessageId);
+      if (!removedIds.length) return;
+
+      broadcast({
+        type: "system",
+        text: `Mensagem excluída${removedIds.length > 1 ? ` (${removedIds.length} itens removidos)` : ""}`,
+        at: nowTime()
+      });
+      broadcastHistoryRefresh();
       return;
     }
 

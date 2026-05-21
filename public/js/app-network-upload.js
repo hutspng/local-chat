@@ -38,6 +38,18 @@
         let data;
         try { data = JSON.parse(ev.data); } catch { return; }
 
+        function applyHistory(items) {
+          if (typeof hideMessageContextMenu === "function") {
+            hideMessageContextMenu();
+          }
+          resetMessageTracking();
+          log.innerHTML = "";
+          for (const item of items) {
+            if (item && item.type === "chat") addChatLine(item);
+          }
+          historyApplied = true;
+        }
+
         if (data.type === "system") {
           addSystemLine(`[${data.at}] [sistema] ${data.text}`);
         } else if (data.type === "session-info") {
@@ -46,14 +58,10 @@
           }
         } else if (data.type === "history") {
           if (!historyApplied) {
-            const items = Array.isArray(data.messages) ? data.messages : [];
-            resetMessageTracking();
-            log.innerHTML = "";
-            for (const item of items) {
-              if (item && item.type === "chat") addChatLine(item);
-            }
-            historyApplied = true;
+            applyHistory(Array.isArray(data.messages) ? data.messages : []);
           }
+        } else if (data.type === "history-refresh") {
+          applyHistory(Array.isArray(data.messages) ? data.messages : []);
         } else if (data.type === "chat") {
           addChatLine(data);
         } else if (data.type === "people-list") {
