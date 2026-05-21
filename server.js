@@ -465,6 +465,611 @@ function broadcastPeopleList() {
   });
 }
 
+const GAME = {
+  width: 2400,
+  height: 1600,
+  players: new Map(),
+  sockets: new Set(),
+  bullets: [],
+  crates: [],
+  items: [],
+  zombies: [],
+  walls: [],
+  nextIds: { player: 1, zombie: 1, bullet: 1, crate: 1, item: 1 },
+  nextGunSpawnAt: Date.now() + 60_000,
+  gameOver: false,
+  gameOverAt: 0,
+  mapReady: false
+};
+
+const GAME_SPAWNS = [
+  { x: 220, y: 220 },
+  { x: 2180, y: 220 },
+  { x: 220, y: 1380 },
+  { x: 2180, y: 1380 },
+  { x: 1200, y: 800 }
+];
+
+const GAME_ZOMBIE_SPAWNS = [
+  { x: 120, y: 100 },
+  { x: 2280, y: 100 },
+  { x: 120, y: 1500 },
+  { x: 2280, y: 1500 },
+  { x: 1200, y: 120 },
+  { x: 1200, y: 1480 }
+];
+
+const GAME_GUN_SPAWNS = [
+  { x: 380, y: 360 },
+  { x: 2060, y: 360 },
+  { x: 380, y: 1260 },
+  { x: 2060, y: 1260 },
+  { x: 1200, y: 260 },
+  { x: 1200, y: 1340 }
+];
+
+const GAME_MELEE_SPAWNS = [
+  { x: 520, y: 800 },
+  { x: 1880, y: 800 }
+];
+
+function nextGameId(prefix, key) {
+  GAME.nextIds[key] += 1;
+  return `${prefix}_${GAME.nextIds[key]}`;
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function distSq(ax, ay, bx, by) {
+  const dx = ax - bx;
+  const dy = ay - by;
+  return dx * dx + dy * dy;
+}
+
+function circleRectCollision(cx, cy, radius, rect) {
+  const closestX = clamp(cx, rect.x, rect.x + rect.w);
+  const closestY = clamp(cy, rect.y, rect.y + rect.h);
+  return distSq(cx, cy, closestX, closestY) <= radius * radius;
+}
+
+function rectRectCollision(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function buildGameWorld() {
+  if (GAME.mapReady) return;
+
+  GAME.mapReady = true;
+  GAME.walls = [
+    { x: 0, y: 0, w: GAME.width, h: 40 },
+    { x: 0, y: GAME.height - 40, w: GAME.width, h: 40 },
+    { x: 0, y: 0, w: 40, h: GAME.height },
+    { x: GAME.width - 40, y: 0, w: 40, h: GAME.height },
+    { x: 300, y: 260, w: 1800, h: 36 },
+    { x: 300, y: 1340, w: 1800, h: 36 },
+    { x: 520, y: 460, w: 36, h: 980 },
+    { x: 1840, y: 460, w: 36, h: 980 },
+    { x: 760, y: 460, w: 36, h: 320 },
+    { x: 760, y: 1140, w: 36, h: 320 },
+    { x: 1560, y: 460, w: 36, h: 320 },
+    { x: 1560, y: 1140, w: 36, h: 320 },
+    { x: 940, y: 820, w: 520, h: 36 }
+  ];
+
+  GAME.crates = [
+    { id: nextGameId("crate", "crate"), x: 640, y: 560, w: 46, h: 46, vx: 0, vy: 0 },
+    { id: nextGameId("crate", "crate"), x: 760, y: 620, w: 46, h: 46, vx: 0, vy: 0 },
+    { id: nextGameId("crate", "crate"), x: 920, y: 1080, w: 46, h: 46, vx: 0, vy: 0 },
+    { id: nextGameId("crate", "crate"), x: 1500, y: 1080, w: 46, h: 46, vx: 0, vy: 0 },
+    { id: nextGameId("crate", "crate"), x: 1780, y: 620, w: 46, h: 46, vx: 0, vy: 0 },
+    { id: nextGameId("crate", "crate"), x: 480, y: 980, w: 46, h: 46, vx: 0, vy: 0 }
+  ];
+
+  GAME.items = [];
+  GAME.GUN_COUNT = 0;
+  GAME.GUN_LIMIT = 3;
+
+  for (const spawn of GAME_MELEE_SPAWNS) {
+    GAME.items.push({
+      id: nextGameId("item", "item"),
+      kind: "melee",
+      label: "Melee",
+      x: spawn.x,
+      y: spawn.y,
+      w: 24,
+      h: 24,
+      respawnAt: 0,
+      picked: false
+    });
+  }
+
+  for (let i = 0; i < 6; i += 1) {
+    const spawn = GAME_GUN_SPAWNS[i % GAME_GUN_SPAWNS.length];
+    GAME.items.push({
+      id: nextGameId("item", "item"),
+      kind: "gun",
+      label: "Arma",
+      x: spawn.x,
+      y: spawn.y,
+      w: 24,
+      h: 24,
+      ammo: 12,
+      respawnAt: 0,
+      picked: false,
+      fixed: i < 2
+    });
+  }
+
+  GAME.zombies = [];
+  for (let i = 0; i < 8; i += 1) {
+    spawnZombieAt(GAME_ZOMBIE_SPAWNS[i % GAME_ZOMBIE_SPAWNS.length], false);
+  }
+}
+
+function spawnZombieAt(spawn, fromPlayer = false, ownerDeviceId = null, ownerName = "") {
+  const zombie = {
+    id: nextGameId("zombie", "zombie"),
+    ownerDeviceId,
+    ownerName,
+    x: spawn.x,
+    y: spawn.y,
+    vx: 0,
+    vy: 0,
+    radius: 16,
+    speed: fromPlayer ? 1.8 : 1.55,
+    hp: fromPlayer ? 4 : 3,
+    stunUntil: 0,
+    respawnAt: 0,
+    wanderAngle: Math.random() * Math.PI * 2,
+    lastAttackAt: 0,
+    isPlayerZombie: fromPlayer
+  };
+  GAME.zombies.push(zombie);
+  return zombie;
+}
+
+function spawnBullet(player, aimX, aimY) {
+  const dx = aimX - player.x;
+  const dy = aimY - player.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const speed = 13;
+  GAME.bullets.push({
+    id: nextGameId("bullet", "bullet"),
+    x: player.x + (dx / len) * 22,
+    y: player.y + (dy / len) * 22,
+    vx: (dx / len) * speed,
+    vy: (dy / len) * speed,
+    radius: 4,
+    ttl: 140,
+    ownerDeviceId: player.deviceId
+  });
+}
+
+function spawnGunIfNeeded(now) {
+  if (now < GAME.nextGunSpawnAt) return;
+  const activeGunCount = GAME.items.filter((item) => item.kind === "gun" && !item.picked).length;
+  if (activeGunCount < GAME.GUN_LIMIT) {
+    const spawn = GAME_GUN_SPAWNS[Math.floor(Math.random() * GAME_GUN_SPAWNS.length)];
+    GAME.items.push({
+      id: nextGameId("item", "item"),
+      kind: "gun",
+      label: "Arma",
+      x: spawn.x,
+      y: spawn.y,
+      w: 24,
+      h: 24,
+      ammo: 12,
+      respawnAt: 0,
+      picked: false
+    });
+  }
+  GAME.nextGunSpawnAt = now + 60_000;
+}
+
+function spawnGamePlayer(ws, deviceId, name) {
+  buildGameWorld();
+  const existing = GAME.players.get(deviceId);
+  if (existing) {
+    existing.name = name;
+    existing.ws = ws;
+    existing.online = true;
+    return existing;
+  }
+
+  const spawn = GAME_SPAWNS[Math.floor(Math.random() * GAME_SPAWNS.length)];
+  const player = {
+    id: nextGameId("player", "player"),
+    deviceId,
+    name,
+    ws,
+    online: true,
+    state: "human",
+    x: spawn.x,
+    y: spawn.y,
+    vx: 0,
+    vy: 0,
+    radius: 16,
+    speed: 3.1,
+    hp: 100,
+    ammo: 0,
+    weapon: "none",
+    melee: false,
+    lastShotAt: 0,
+    lastMeleeAt: 0,
+    input: { up: false, down: false, left: false, right: false, aimX: spawn.x, aimY: spawn.y, shoot: false, melee: false },
+    spectatingZombieId: null,
+    respawnZombieId: null
+  };
+
+  GAME.players.set(deviceId, player);
+  return player;
+}
+
+function removeGameConnection(ws) {
+  if (!ws.gameDeviceId) return;
+  const player = GAME.players.get(ws.gameDeviceId);
+  if (!player) return;
+
+  player.ws = null;
+  player.online = false;
+
+  if (player.state === "human") {
+    GAME.players.delete(ws.gameDeviceId);
+  }
+}
+
+function getNearestHuman(x, y) {
+  let best = null;
+  let bestDist = Infinity;
+  for (const player of GAME.players.values()) {
+    if (player.state !== "human") continue;
+    const d = distSq(x, y, player.x, player.y);
+    if (d < bestDist) {
+      bestDist = d;
+      best = player;
+    }
+  }
+  return best;
+}
+
+function moveCircleWithCollisions(entity, dx, dy, radius, pushStrength = 0) {
+  const tryMoveAxis = (axis) => {
+    if (axis === "x") entity.x += dx;
+    else entity.y += dy;
+
+    entity.x = clamp(entity.x, radius + 40, GAME.width - radius - 40);
+    entity.y = clamp(entity.y, radius + 40, GAME.height - radius - 40);
+
+    for (const wall of GAME.walls) {
+      if (circleRectCollision(entity.x, entity.y, radius, wall)) {
+        if (axis === "x") entity.x -= dx;
+        else entity.y -= dy;
+        return false;
+      }
+    }
+
+    for (const crate of GAME.crates) {
+      const crateRect = crate;
+      if (!circleRectCollision(entity.x, entity.y, radius, crateRect)) continue;
+      if (pushStrength > 0) {
+        const tx = crate.x + crate.w / 2 - entity.x;
+        const ty = crate.y + crate.h / 2 - entity.y;
+        const len = Math.hypot(tx, ty) || 1;
+        crate.vx += (tx / len) * pushStrength;
+        crate.vy += (ty / len) * pushStrength;
+      }
+      if (axis === "x") entity.x -= dx;
+      else entity.y -= dy;
+      return false;
+    }
+
+    return true;
+  };
+
+  tryMoveAxis("x");
+  tryMoveAxis("y");
+}
+
+function rectCollisionWithWorld(rect) {
+  for (const wall of GAME.walls) {
+    if (rectRectCollision(rect, wall)) return true;
+  }
+  for (const crate of GAME.crates) {
+    if (rectRectCollision(rect, crate)) return true;
+  }
+  return false;
+}
+
+function placeCrateOutsideCollision(crate) {
+  crate.x = clamp(crate.x, 52, GAME.width - crate.w - 52);
+  crate.y = clamp(crate.y, 52, GAME.height - crate.h - 52);
+  if (!rectCollisionWithWorld(crate)) return;
+  const snap = [
+    { x: 60, y: 60 }, { x: GAME.width - 110, y: 60 },
+    { x: 60, y: GAME.height - 110 }, { x: GAME.width - 110, y: GAME.height - 110 }
+  ];
+  for (const p of snap) {
+    crate.x = p.x;
+    crate.y = p.y;
+    if (!rectCollisionWithWorld(crate)) break;
+  }
+}
+
+function convertPlayerToZombie(player) {
+  if (!player || player.state !== "human") return null;
+  player.state = "zombie";
+  player.hp = 3;
+  player.radius = 16;
+  player.speed = 1.6;
+  player.weapon = "none";
+  player.ammo = 0;
+  player.melee = false;
+  player.spectatingZombieId = player.id;
+  player.respawnZombieId = player.id;
+  const zombie = spawnZombieAt({ x: player.x, y: player.y }, true, player.deviceId, player.name);
+  zombie.id = player.id;
+  zombie.ownerDeviceId = player.deviceId;
+  zombie.ownerName = player.name;
+  zombie.x = player.x;
+  zombie.y = player.y;
+  zombie.isPlayerZombie = true;
+  GAME.zombies = GAME.zombies.filter((entry) => entry.id !== player.id);
+  GAME.zombies.push(zombie);
+  return zombie;
+}
+
+function emitGameInit(ws, player) {
+  ws.send(JSON.stringify({
+    type: "game-init",
+    at: nowTime(),
+    map: {
+      width: GAME.width,
+      height: GAME.height,
+      walls: GAME.walls,
+      crates: GAME.crates,
+      meleePoints: GAME_MELEE_SPAWNS,
+      gunPoints: GAME_GUN_SPAWNS,
+      spawnPoints: GAME_SPAWNS
+    },
+    player: {
+      id: player.id,
+      name: player.name,
+      state: player.state,
+      weapon: player.weapon,
+      ammo: player.ammo,
+      spectatingZombieId: player.spectatingZombieId
+    }
+  }));
+}
+
+function broadcastGameState() {
+  const payload = JSON.stringify({
+    type: "game-state",
+    at: nowTime(),
+    time: Date.now(),
+    players: Array.from(GAME.players.values()).map((p) => ({
+      id: p.id,
+      deviceId: p.deviceId,
+      name: p.name,
+      state: p.state,
+      x: p.x,
+      y: p.y,
+      hp: p.hp,
+      ammo: p.ammo,
+      weapon: p.weapon,
+      spectatingZombieId: p.spectatingZombieId,
+      online: p.online
+    })),
+    zombies: GAME.zombies.map((z) => ({
+      id: z.id,
+      ownerDeviceId: z.ownerDeviceId,
+      ownerName: z.ownerName,
+      x: z.x,
+      y: z.y,
+      hp: z.hp,
+      isPlayerZombie: !!z.isPlayerZombie
+    })),
+    bullets: GAME.bullets.map((b) => ({ id: b.id, x: b.x, y: b.y })),
+    items: GAME.items.filter((item) => !item.picked).map((item) => ({
+      id: item.id,
+      kind: item.kind,
+      label: item.label,
+      x: item.x,
+      y: item.y,
+      ammo: item.ammo || 0
+    }))
+  });
+
+  for (const ws of GAME.sockets) {
+    if (ws.readyState === WebSocket.OPEN) ws.send(payload);
+  }
+}
+
+function resetGameWorld() {
+  GAME.players.clear();
+  GAME.bullets = [];
+  GAME.zombies = [];
+  GAME.items = [];
+  GAME.nextIds = { player: 1, zombie: 1, bullet: 1, crate: 1, item: 1 };
+  GAME.nextGunSpawnAt = Date.now() + 60_000;
+  GAME.gameOver = false;
+  GAME.gameOverAt = 0;
+  GAME.mapReady = false;
+  buildGameWorld();
+}
+
+buildGameWorld();
+
+setInterval(() => {
+  if (GAME.gameOver) return;
+
+  const now = Date.now();
+  spawnGunIfNeeded(now);
+
+  for (const item of GAME.items) {
+    if (item.picked && item.respawnAt && now >= item.respawnAt) {
+      item.picked = false;
+      item.respawnAt = 0;
+      const spawn = item.kind === "melee"
+        ? GAME_MELEE_SPAWNS.find((entry) => distSq(entry.x, entry.y, item.x, item.y) < 1) || GAME_MELEE_SPAWNS[0]
+        : GAME_GUN_SPAWNS.find((entry) => distSq(entry.x, entry.y, item.x, item.y) < 1) || GAME_GUN_SPAWNS[0];
+      item.x = spawn.x;
+      item.y = spawn.y;
+    }
+  }
+
+  for (const crate of GAME.crates) {
+    crate.x += crate.vx;
+    crate.y += crate.vy;
+    crate.vx *= 0.88;
+    crate.vy *= 0.88;
+
+    crate.x = clamp(crate.x, 48, GAME.width - crate.w - 48);
+    crate.y = clamp(crate.y, 48, GAME.height - crate.h - 48);
+
+    if (rectCollisionWithWorld(crate)) {
+      crate.x -= crate.vx;
+      crate.y -= crate.vy;
+      crate.vx *= -0.2;
+      crate.vy *= -0.2;
+    }
+  }
+
+  for (const bullet of GAME.bullets) {
+    bullet.x += bullet.vx;
+    bullet.y += bullet.vy;
+    bullet.ttl -= 1;
+  }
+
+  GAME.bullets = GAME.bullets.filter((bullet) => {
+    if (bullet.ttl <= 0) return false;
+    if (bullet.x < 40 || bullet.y < 40 || bullet.x > GAME.width - 40 || bullet.y > GAME.height - 40) return false;
+    if (GAME.walls.some((wall) => circleRectCollision(bullet.x, bullet.y, bullet.radius, wall))) return false;
+    if (GAME.crates.some((crate) => circleRectCollision(bullet.x, bullet.y, bullet.radius, crate))) return false;
+
+    for (const zombie of GAME.zombies) {
+      if (zombie.respawnAt && now < zombie.respawnAt) continue;
+      if (distSq(bullet.x, bullet.y, zombie.x, zombie.y) > 18 * 18) continue;
+      zombie.hp -= 1;
+      const dx = zombie.x - bullet.x;
+      const dy = zombie.y - bullet.y;
+      const len = Math.hypot(dx, dy) || 1;
+      zombie.x += (dx / len) * 12;
+      zombie.y += (dy / len) * 12;
+      if (zombie.hp <= 0) {
+        zombie.respawnAt = now + 8_000;
+        zombie.hp = zombie.isPlayerZombie ? 4 : 3;
+        const respawn = GAME_ZOMBIE_SPAWNS[Math.floor(Math.random() * GAME_ZOMBIE_SPAWNS.length)];
+        zombie.x = respawn.x;
+        zombie.y = respawn.y;
+        zombie.stunUntil = now + 2_000;
+      }
+      return false;
+    }
+
+    return true;
+  });
+
+  for (const player of GAME.players.values()) {
+    if (player.state !== "human") continue;
+    const input = player.input;
+    const moveX = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+    const moveY = (input.down ? 1 : 0) - (input.up ? 1 : 0);
+    const len = Math.hypot(moveX, moveY) || 1;
+    const speed = player.speed * (input.shift ? 1.25 : 1);
+    const dx = (moveX / len) * speed;
+    const dy = (moveY / len) * speed;
+    moveCircleWithCollisions(player, dx, dy, player.radius, 0.28);
+
+    for (const item of GAME.items) {
+      if (item.picked) continue;
+      if (distSq(player.x, player.y, item.x + item.w / 2, item.y + item.h / 2) > 26 * 26) continue;
+      if (item.kind === "gun") {
+        player.weapon = "gun";
+        player.ammo += item.ammo || 12;
+      } else if (item.kind === "melee") {
+        player.weapon = "melee";
+        player.melee = true;
+      }
+      item.picked = true;
+      item.respawnAt = item.kind === "melee" ? now + 45_000 : now + 60_000;
+    }
+
+    if (input.shoot && player.weapon === "gun" && player.ammo > 0 && now - player.lastShotAt > 220) {
+      spawnBullet(player, input.aimX, input.aimY);
+      player.ammo -= 1;
+      player.lastShotAt = now;
+    }
+
+    if (input.melee && player.weapon === "melee" && now - player.lastMeleeAt > 500) {
+      for (const zombie of GAME.zombies) {
+        if (zombie.respawnAt && now < zombie.respawnAt) continue;
+        if (distSq(player.x, player.y, zombie.x, zombie.y) > 44 * 44) continue;
+        zombie.hp -= 1;
+        zombie.stunUntil = now + 900;
+      }
+      player.lastMeleeAt = now;
+    }
+  }
+
+  for (const zombie of GAME.zombies) {
+    if (zombie.respawnAt && now < zombie.respawnAt) continue;
+    if (zombie.stunUntil && now < zombie.stunUntil) continue;
+
+    const target = getNearestHuman(zombie.x, zombie.y);
+    let dx = 0;
+    let dy = 0;
+    if (target) {
+      const tx = target.x - zombie.x;
+      const ty = target.y - zombie.y;
+      const len = Math.hypot(tx, ty) || 1;
+      dx = (tx / len) * zombie.speed;
+      dy = (ty / len) * zombie.speed;
+
+      if (distSq(zombie.x, zombie.y, target.x, target.y) < 26 * 26 && now - zombie.lastAttackAt > 700) {
+        zombie.lastAttackAt = now;
+        target.hp -= 34;
+        if (target.hp <= 0) {
+          convertPlayerToZombie(target);
+        }
+      }
+    } else {
+      zombie.wanderAngle += (Math.random() - 0.5) * 0.15;
+      dx = Math.cos(zombie.wanderAngle) * zombie.speed * 0.4;
+      dy = Math.sin(zombie.wanderAngle) * zombie.speed * 0.4;
+    }
+
+    moveCircleWithCollisions(zombie, dx, dy, zombie.radius, 0.15);
+
+    if (zombie.isPlayerZombie && zombie.ownerDeviceId) {
+      const ownerPlayer = GAME.players.get(zombie.ownerDeviceId);
+      if (ownerPlayer) {
+        ownerPlayer.x = zombie.x;
+        ownerPlayer.y = zombie.y;
+        ownerPlayer.hp = zombie.hp;
+        ownerPlayer.state = "zombie";
+        ownerPlayer.spectatingZombieId = zombie.id;
+      }
+    }
+  }
+
+  const humansAlive = Array.from(GAME.players.values()).some((player) => player.state === "human");
+  if (!humansAlive) {
+    GAME.gameOver = true;
+    GAME.gameOverAt = now;
+    broadcast({
+      type: "game-over",
+      at: nowTime(),
+      text: "Todos viraram zumbis."
+    });
+    return;
+  }
+
+  broadcastGameState();
+}, 50);
+
 wss.on("connection", (ws, req) => {
   clients.add(ws);
   ws.incomingTransfers = new Map();
@@ -473,6 +1078,7 @@ wss.on("connection", (ws, req) => {
   ws.userName = "Anônimo";
   ws.tabActive = true;
   ws.lastPokeAt = 0;
+  ws.clientMode = "chat";
   ws.canBlockNames = isHostMachineAddress(req?.socket?.remoteAddress);
   let isNewUser = false;
 
@@ -489,9 +1095,23 @@ wss.on("connection", (ws, req) => {
       const deviceId = String(data.deviceId).slice(0, 64);
       const userName = normalizeName(data.name);
       const tabActive = typeof data.tabActive === "boolean" ? data.tabActive : true;
+      const clientMode = data.mode === "game" ? "game" : "chat";
+
+      ws.clientMode = clientMode;
 
       if (isNameBlocked(userName)) {
         sendNameError(ws, userName, `O nome "${userName}" foi bloqueado pelo host. Escolha outro.`);
+        return;
+      }
+
+      if (clientMode === "game") {
+        ws.removeListener("message", tempListener);
+        ws.on("message", onMessage);
+        ws.gameDeviceId = deviceId;
+        GAME.sockets.add(ws);
+
+        const player = spawnGamePlayer(ws, deviceId, userName);
+        emitGameInit(ws, player);
         return;
       }
 
@@ -564,6 +1184,25 @@ function onMessage(raw) {
   try {
     data = JSON.parse(raw.toString());
   } catch {
+    return;
+  }
+
+  if (ws.clientMode === "game" && data.type === "game-input") {
+    const player = GAME.players.get(ws.gameDeviceId);
+    if (!player) return;
+
+    const nextInput = data.input && typeof data.input === "object" ? data.input : data;
+    player.input = {
+      up: !!nextInput.up,
+      down: !!nextInput.down,
+      left: !!nextInput.left,
+      right: !!nextInput.right,
+      shift: !!nextInput.shift,
+      aimX: Number(nextInput.aimX) || player.x,
+      aimY: Number(nextInput.aimY) || player.y,
+      shoot: !!nextInput.shoot,
+      melee: !!nextInput.melee
+    };
     return;
   }
 
@@ -1050,6 +1689,10 @@ function onMessage(raw) {
 
 function handleClientClose(ws) {
   clients.delete(ws);
+  if (ws.clientMode === "game") {
+    GAME.sockets.delete(ws);
+    removeGameConnection(ws);
+  }
   if (ws.incomingTransfers) ws.incomingTransfers.clear();
   if (ws.incomingBundles) ws.incomingBundles.clear();
   if (!ws.deviceId) return;
