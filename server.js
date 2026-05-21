@@ -256,6 +256,16 @@ const clients = new Set();
 const activeUsers = new Map(); // deviceId -> Set of WebSocket connections
 // Mapeia nome normalizado -> deviceId (ajuda garantir nomes únicos por dispositivo)
 const nameToDevice = new Map();
+const blockedNames = new Set();
+const localIpv4Addresses = new Set();
+
+for (const interfaces of Object.values(os.networkInterfaces())) {
+  for (const iface of interfaces || []) {
+    if (iface.family === "IPv4" && !iface.internal) {
+      localIpv4Addresses.add(iface.address);
+    }
+  }
+}
 const chatHistory = [];
 const MAX_HISTORY = 200;
 let messageIdCounter = 0;
@@ -337,6 +347,22 @@ function normalizeNameKey(name) {
   return String(name || "").trim().toLocaleLowerCase("pt-BR");
 }
 
+function normalizeRemoteAddress(address) {
+  return String(address || "")
+    .replace(/^::ffff:/, "")
+    .trim();
+}
+
+function isHostMachineAddress(address) {
+  const normalized = normalizeRemoteAddress(address);
+  return normalized === "127.0.0.1" || normalized === "::1" || localIpv4Addresses.has(normalized);
+}
+
+function isNameBlocked(name) {
+  const key = normalizeNameKey(name);
+  return !!key && blockedNames.has(key);
+}
+
 function isNameInUse(name, excludeDeviceId = null) {
   const key = normalizeNameKey(name);
   if (!key) return false;
@@ -355,12 +381,13 @@ function isNameInUse(name, excludeDeviceId = null) {
   return false;
 }
 
-function sendNameError(ws, attemptedName) {
+function sendNameError(ws, attemptedName, message) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const text = message || `O nome "${attemptedName}" já está em uso. Escolha outro.`;
   ws.send(JSON.stringify({
     type: "name-error",
     attemptedName,
-    text: `O nome \"${attemptedName}\" já está em uso. Escolha outro.`,
+    text,
     at: nowTime()
   }));
 }
@@ -373,7 +400,7 @@ function broadcastPeopleList() {
   });
 }
 
-wss.on("connection", (ws) => {
+wss.on("connection", (ws, req) => {
   clients.add(ws);
   ws.incomingTransfers = new Map();
   ws.incomingBundles = new Map();
@@ -381,6 +408,7 @@ wss.on("connection", (ws) => {
   ws.userName = "Anônimo";
   ws.tabActive = true;
   ws.lastPokeAt = 0;
+  ws.canBlockNames = isHostMachineAddress(req?.socket?.remoteAddress);
   let isNewUser = false;
 
   // Primeiro recebemos mensagem com deviceId
@@ -396,6 +424,11 @@ wss.on("connection", (ws) => {
       const deviceId = String(data.deviceId).slice(0, 64);
       const userName = normalizeName(data.name);
       const tabActive = typeof data.tabActive === "boolean" ? data.tabActive : true;
+
+      if (isNameBlocked(userName)) {
+        sendNameError(ws, userName, `O nome "${userName}" foi bloqueado pelo host. Escolha outro.`);
+        return;
+      }
 
       // Verifica se outro dispositivo já registrou este nome
       const nameKey = normalizeNameKey(userName);
@@ -427,6 +460,12 @@ wss.on("connection", (ws) => {
       ws.send(JSON.stringify({
         type: "system",
         text: `Conectado. Usuários online: ${activeUsers.size}`,
+        at: nowTime()
+      }));
+
+      ws.send(JSON.stringify({
+        type: "session-info",
+        canBlockNames: !!ws.canBlockNames,
         at: nowTime()
       }));
 
@@ -539,6 +578,11 @@ function onMessage(raw) {
       const nextName = normalizeName(data.name || ws.userName);
       const nextTabActive = typeof data.tabActive === "boolean" ? data.tabActive : ws.tabActive;
 
+      if (isNameBlocked(nextName)) {
+        sendNameError(ws, nextName, `O nome "${nextName}" foi bloqueado pelo host. Escolha outro.`);
+        return;
+      }
+
       const oldKey = normalizeNameKey(ws.userName);
       const newKey = normalizeNameKey(nextName);
 
@@ -564,6 +608,45 @@ function onMessage(raw) {
       if (changed || data.force) {
         broadcastPeopleList();
       }
+      return;
+    }
+
+    if (data.type === "block-name") {
+      if (!ws.canBlockNames) return;
+
+      const targetName = normalizeName(data.name || data.targetName);
+      const targetKey = normalizeNameKey(targetName);
+      if (!targetKey) return;
+      if (blockedNames.has(targetKey)) return;
+
+      blockedNames.add(targetKey);
+
+      const affectedSockets = [];
+      for (const sockets of activeUsers.values()) {
+        for (const socket of sockets) {
+          if (!socket || normalizeNameKey(socket.userName) !== targetKey) continue;
+          affectedSockets.push(socket);
+        }
+      }
+
+      for (const socket of affectedSockets) {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({
+            type: "name-blocked",
+            name: targetName,
+            text: `O nome "${targetName}" foi bloqueado pelo host.`,
+            at: nowTime()
+          }));
+          socket.close(4003, "blocked-name");
+        }
+      }
+
+      broadcast({
+        type: "system",
+        text: `Nome bloqueado pelo host: ${targetName}`,
+        at: nowTime()
+      });
+      broadcastPeopleList();
       return;
     }
 

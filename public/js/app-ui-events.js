@@ -280,11 +280,24 @@
       sendPresenceUpdate();
     });
 
+    document.addEventListener("click", (e) => {
+      if (!peopleContextMenu || !peopleContextMenu.classList.contains("show")) return;
+      if (e.target.closest("#peopleContextMenu")) return;
+      hidePeopleContextMenu();
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") hidePeopleContextMenu();
+    });
+
     window.addEventListener("focus", () => {
       sendPresenceUpdate();
     });
 
     window.addEventListener("blur", () => {
+      hidePeopleContextMenu();
       sendPresenceUpdate();
     });
+
+    window.addEventListener("resize", hidePeopleContextMenu);
 

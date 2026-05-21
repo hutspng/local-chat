@@ -95,6 +95,41 @@
       user-select:none;
     }
 
+    /* ===== Menu de contexto da lista de pessoas ===== */
+    .peopleContextMenu{
+      position:fixed;
+      z-index:1300;
+      display:none;
+      min-width:180px;
+      padding:8px;
+      border:1px solid rgba(255,255,255,.14);
+      border-radius:12px;
+      background:rgba(10,16,31,.96);
+      box-shadow:0 18px 40px rgba(0,0,0,.45);
+      backdrop-filter: blur(8px);
+    }
+
+    .peopleContextMenu.show{
+      display:block;
+    }
+
+    .peopleContextMenu button{
+      width:100%;
+      justify-content:flex-start;
+      border:none;
+      background:transparent;
+      color:var(--text);
+      padding:10px 12px;
+      border-radius:10px;
+      cursor:pointer;
+      font-weight:600;
+      text-align:left;
+    }
+
+    .peopleContextMenu button:hover{
+      background:rgba(255,255,255,.08);
+    }
+
     /* ===== Menções ===== */
     .chatMention{
       color:#32d296;

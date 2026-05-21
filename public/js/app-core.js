@@ -21,6 +21,8 @@
     const nameOverlay = document.getElementById("nameOverlay");
     const namePick = document.getElementById("namePick");
     const enterChat = document.getElementById("enterChat");
+    const peopleContextMenu = document.getElementById("peopleContextMenu");
+    const blockNameAction = document.getElementById("blockNameAction");
     const peopleState = new Map();
 
     // ===== Rastreamento de menções =====
@@ -97,6 +99,7 @@
 
     function renderPeopleList(people) {
       if (!peopleListEl) return;
+      hidePeopleContextMenu();
       const normalized = Array.isArray(people) ? people : [];
       peopleState.clear();
       peopleListEl.innerHTML = "";
@@ -120,6 +123,7 @@
       for (const person of sorted) {
         const item = document.createElement("div");
         item.className = "peopleItem";
+        item.dataset.deviceId = person.deviceId;
 
         const dot = document.createElement("button");
         dot.type = "button";
@@ -145,6 +149,12 @@
         const state = document.createElement("div");
         state.className = "peopleState";
         state.textContent = person.tabActive ? "ativo" : "ausente";
+
+        item.addEventListener("contextmenu", (e) => {
+          if (!canBlockNames || person.deviceId === deviceId) return;
+          e.preventDefault();
+          showPeopleContextMenu(person, e.clientX, e.clientY);
+        });
 
         item.appendChild(dot);
         item.appendChild(nameBtn);
@@ -469,6 +479,8 @@
 
     // ===== Nome obrigatório antes de conectar =====
     let myName = null;
+    let canBlockNames = false;
+    let currentContextPerson = null;
     const savedName = localStorage.getItem("chat_name");
     if (savedName) {
       const validated = sanitizeName(savedName);
@@ -486,6 +498,49 @@
 
     function hideNameModal() {
       nameOverlay.classList.remove("show");
+    }
+
+    function hidePeopleContextMenu() {
+      if (!peopleContextMenu) return;
+      peopleContextMenu.classList.remove("show");
+      peopleContextMenu.setAttribute("aria-hidden", "true");
+      currentContextPerson = null;
+    }
+
+    function setCanBlockNames(enabled) {
+      canBlockNames = !!enabled;
+      if (!canBlockNames) hidePeopleContextMenu();
+    }
+
+    function showPeopleContextMenu(person, clientX, clientY) {
+      if (!peopleContextMenu || !person || !canBlockNames) return;
+
+      currentContextPerson = person;
+      peopleContextMenu.classList.add("show");
+      peopleContextMenu.setAttribute("aria-hidden", "false");
+
+      const menuWidth = 220;
+      const menuHeight = 68;
+      const left = Math.max(8, Math.min(clientX, window.innerWidth - menuWidth - 8));
+      const top = Math.max(8, Math.min(clientY, window.innerHeight - menuHeight - 8));
+
+      peopleContextMenu.style.left = `${left}px`;
+      peopleContextMenu.style.top = `${top}px`;
+    }
+
+    function blockCurrentContextName() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      if (!canBlockNames || !currentContextPerson) return;
+      if (currentContextPerson.deviceId === deviceId) return;
+
+      ws.send(JSON.stringify({
+        type: "block-name",
+        name: currentContextPerson.name,
+        targetDeviceId: currentContextPerson.deviceId
+      }));
+
+      addSystemLine(`[sistema] solicitação de bloqueio enviada para ${currentContextPerson.name}.`);
+      hidePeopleContextMenu();
     }
 
     function confirmName() {

@@ -1,9 +1,12 @@
+    let wasBlockedByHost = false;
+
     function connect() {
       if (!myName) return;
 
       setStatus(false, "conectando...");
       ws = new WebSocket(wsUrl);
       historyApplied = false;
+      wasBlockedByHost = false;
 
       function sendIdentity() {
         if (!ws || ws.readyState !== WebSocket.OPEN || !myName) return;
@@ -27,6 +30,7 @@
       ws.addEventListener("close", () => {
         setStatus(false, "offline (tentando reconectar...)");
         addLine("[sistema] desconectou", "system");
+        if (wasBlockedByHost) return;
         setTimeout(connect, 800);
       });
 
@@ -36,6 +40,10 @@
 
         if (data.type === "system") {
           addSystemLine(`[${data.at}] [sistema] ${data.text}`);
+        } else if (data.type === "session-info") {
+          if (typeof setCanBlockNames === "function") {
+            setCanBlockNames(!!data.canBlockNames);
+          }
         } else if (data.type === "history") {
           if (!historyApplied) {
             const items = Array.isArray(data.messages) ? data.messages : [];
@@ -56,6 +64,14 @@
           const msg = String(data.text || "Nome já está em uso. Escolha outro.");
           addSystemLine(`[${data.at || "--:--:--"}] [sistema] ${msg}`);
           setStatus(false, "nome em conflito");
+          showNameModal();
+        } else if (data.type === "name-blocked") {
+          const msg = String(data.text || "Nome bloqueado pelo host.");
+          wasBlockedByHost = true;
+          myName = null;
+          localStorage.removeItem("chat_name");
+          addSystemLine(`[${data.at || "--:--:--"}] [sistema] ${msg}`);
+          setStatus(false, "nome bloqueado");
           showNameModal();
         }
       });
